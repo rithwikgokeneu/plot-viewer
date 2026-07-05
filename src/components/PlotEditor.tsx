@@ -36,7 +36,6 @@ export default function PlotEditor() {
   const [busy, setBusy] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [ocr, setOcr] = useState<{ done: number; total: number } | null>(null);
-  const [source, setSource] = useState<"image" | "dxf">("image");
 
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -59,7 +58,6 @@ export default function PlotEditor() {
       const d = fit(p.natW, p.natH, DISP_MAX_W, DISP_MAX_H);
       setDisp({ w: d.w, h: d.h });
       setPlots(p.plots);
-      setSource(p.source ?? "image");
       setSavedAt(p.updatedAt);
     })();
     return () => {
@@ -77,13 +75,12 @@ export default function PlotEditor() {
         procW: proc.w,
         procH: proc.h,
         plots: nextPlots,
-        source,
         updatedAt: Date.now(),
       };
       await saveProject(project);
       setSavedAt(project.updatedAt);
     },
-    [imageBlob, nat, proc, source]
+    [imageBlob, nat, proc]
   );
 
   const runDetect = useCallback(
@@ -133,7 +130,6 @@ export default function PlotEditor() {
         setNat({ w: image.width, h: image.height });
         setDisp({ w: d.w, h: d.h });
         setProc({ w: pr.w, h: pr.h });
-        setSource("image");
         setBusy("Detecting plots…");
         setTimeout(async () => {
           const next = runDetect(image, pr.w, pr.h, threshold, invert);
@@ -147,7 +143,6 @@ export default function PlotEditor() {
             procW: pr.w,
             procH: pr.h,
             plots: next,
-            source: "image",
             updatedAt: Date.now(),
           });
           setSavedAt(Date.now());
@@ -158,82 +153,6 @@ export default function PlotEditor() {
       image.src = url;
     } catch {
       setBusy("HEIC conversion failed — try a PNG or JPG.");
-    }
-  }
-
-  // Import plots from a DXF (AutoCAD) file: exact polygons + true printed numbers.
-  async function onDxf(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy("Parsing CAD file…");
-    try {
-      const text = await file.text();
-      const { parseDxfPlots } = await import("@/lib/dxf");
-      const { plots: raw, procW, procH } = parseDxfPlots(text);
-      if (raw.length === 0) {
-        setBusy("No plots found in that DXF.");
-        return;
-      }
-      // render a white backdrop with light plot outlines for context
-      const canvas = document.createElement("canvas");
-      canvas.width = procW;
-      canvas.height = procH;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, procW, procH);
-      ctx.strokeStyle = "#d1d5db";
-      ctx.lineWidth = 1;
-      for (const p of raw) {
-        ctx.beginPath();
-        p.polygon.forEach((pt, i) =>
-          i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y)
-        );
-        ctx.closePath();
-        ctx.stroke();
-      }
-      const blob: Blob = await new Promise((res) =>
-        canvas.toBlob((b) => res(b as Blob), "image/png")
-      );
-      const plots: Plot[] = raw.map((p, i) => {
-        let cx = 0;
-        let cy = 0;
-        for (const pt of p.polygon) {
-          cx += pt.x;
-          cy += pt.y;
-        }
-        return {
-          id: i + 1,
-          num: p.num,
-          polygon: p.polygon,
-          centroid: { x: cx / p.polygon.length, y: cy / p.polygon.length },
-          status: "available" as Status,
-        };
-      });
-      const url = URL.createObjectURL(blob);
-      imgRef.current = null;
-      setImageBlob(blob);
-      setImgUrl(url);
-      setNat({ w: procW, h: procH });
-      setProc({ w: procW, h: procH });
-      const d = fit(procW, procH, DISP_MAX_W, DISP_MAX_H);
-      setDisp({ w: d.w, h: d.h });
-      setPlots(plots);
-      setSelectedId(null);
-      setSource("dxf");
-      await saveProject({
-        image: blob,
-        natW: procW,
-        natH: procH,
-        procW,
-        procH,
-        plots,
-        source: "dxf",
-        updatedAt: Date.now(),
-      });
-      setSavedAt(Date.now());
-      setBusy(null);
-    } catch {
-      setBusy("Could not parse that DXF file.");
     }
   }
 
@@ -386,15 +305,6 @@ export default function PlotEditor() {
               className="hidden"
             />
           </label>
-          <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white">
-            Import CAD (DXF)
-            <input
-              type="file"
-              accept=".dxf"
-              onChange={onDxf}
-              className="hidden"
-            />
-          </label>
           {savedAt && (
             <span className="text-xs text-green-700">
               Published ✓ {new Date(savedAt).toLocaleTimeString()}
@@ -457,7 +367,6 @@ export default function PlotEditor() {
           </div>
         </div>
 
-        {source === "image" && (
         <div className="flex flex-col gap-2 rounded border border-neutral-200 p-3">
           <h3 className="font-semibold">Detection</h3>
           <label className="flex items-center justify-between gap-2">
@@ -512,14 +421,6 @@ export default function PlotEditor() {
             any wrong ones in the list below.
           </p>
         </div>
-        )}
-
-        {source === "dxf" && (
-          <div className="rounded border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-            Imported from CAD — plot numbers are read directly from the drawing
-            and are exact. Upload a new file to replace this project.
-          </div>
-        )}
 
         <div className="rounded border border-neutral-200">
           <div className="border-b border-neutral-200 px-3 py-2 font-semibold">

@@ -29,10 +29,9 @@ export interface Project {
   image: Blob; // layout image, or a rendered white backdrop for CAD imports
   natW: number;
   natH: number;
-  procW: number; // coordinate space used for polygon coords
+  procW: number; // detection resolution used for polygon coords
   procH: number;
   plots: Plot[];
-  source?: "image" | "dxf"; // how plots were produced
   updatedAt: number;
 }
 
