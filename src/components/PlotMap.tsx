@@ -14,8 +14,9 @@ interface Props {
   onPlotHover?: (id: number) => void;
 }
 
-// Shared map renderer: the layout image with a scaled SVG overlay of colored,
-// numbered plot polygons. Interactive when onPlotClick is provided.
+// Shared map renderer: the layout image with a scaled SVG overlay of colored
+// plot polygons. The fill is kept translucent so the map's own printed plot
+// numbers stay readable through each box. Interactive when onPlotClick is set.
 export default function PlotMap({
   imgUrl,
   dispW,
@@ -27,7 +28,6 @@ export default function PlotMap({
   onPlotClick,
   onPlotHover,
 }: Props) {
-  const fontScale = procW && dispW ? procW / dispW : 1;
   return (
     <div
       className="relative border border-neutral-300 bg-neutral-50"
@@ -52,31 +52,18 @@ export default function PlotMap({
           const c = STATUS[p.status].color;
           const sel = p.id === selectedId;
           return (
-            <g key={p.id}>
-              <polygon
-                points={p.polygon.map((pt) => `${pt.x},${pt.y}`).join(" ")}
-                fill={c}
-                fillOpacity={sel ? 0.6 : 0.38}
-                stroke={c}
-                strokeWidth={sel ? 3 : 1.5}
-                vectorEffect="non-scaling-stroke"
-                style={{ cursor: onPlotClick ? "pointer" : "default" }}
-                onClick={onPlotClick ? () => onPlotClick(p.id) : undefined}
-                onMouseEnter={onPlotHover ? () => onPlotHover(p.id) : undefined}
-              />
-              <text
-                x={p.centroid.x}
-                y={p.centroid.y}
-                fontSize={11 * fontScale}
-                fontWeight={700}
-                fill="#111"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                style={{ pointerEvents: "none" }}
-              >
-                {p.num}
-              </text>
-            </g>
+            <polygon
+              key={p.id}
+              points={p.polygon.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+              fill={c}
+              fillOpacity={sel ? 0.45 : 0.22}
+              stroke={c}
+              strokeWidth={sel ? 3 : 1.5}
+              vectorEffect="non-scaling-stroke"
+              style={{ cursor: onPlotClick ? "pointer" : "default" }}
+              onClick={onPlotClick ? () => onPlotClick(p.id) : undefined}
+              onMouseEnter={onPlotHover ? () => onPlotHover(p.id) : undefined}
+            />
           );
         })}
       </svg>
