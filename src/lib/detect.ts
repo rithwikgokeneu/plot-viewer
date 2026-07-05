@@ -248,17 +248,32 @@ export function detectPlots(
   const minA = (opts.minAreaFrac ?? 0.0008) * total;
   const maxA = (opts.maxAreaFrac ?? 0.25) * total;
 
+  // first pass: enclosed regions within the absolute area band
+  const cand = regions.filter(
+    (r) => !r.border && r.area >= minA && r.area <= maxA
+  );
+  // Plots are uniformly sized. Keep regions near the MEDIAN plot area so that
+  // larger non-plot regions (open spaces, the legend/info box, decorations)
+  // and leftover speckles are dropped without needing manual cleanup.
+  const sortedA = cand.map((r) => r.area).sort((a, b) => a - b);
+  const med = sortedA.length ? sortedA[sortedA.length >> 1] : 0;
+  const loA = 0.4 * med;
+  const hiA = 3 * med;
+
   const plots: DetectedPlot[] = [];
-  for (const r of regions) {
-    if (r.border) continue;
-    if (r.area < minA || r.area > maxA) continue;
+  for (const r of cand) {
+    if (med > 0 && (r.area < loA || r.area > hiA)) continue;
+    const bw = r.maxx - r.minx + 1;
+    const bh = r.maxy - r.miny + 1;
+    const ar = bw / bh;
+    if (ar < 0.3 || ar > 3.5) continue; // reject slivers / road fragments
     const polygon = regionHull(labels, w, h, r);
     if (polygon.length < 3) continue;
     plots.push({
       polygon,
       areaPx: r.area,
       centroid: { x: r.cx, y: r.cy },
-      bbox: { x: r.minx, y: r.miny, w: r.maxx - r.minx + 1, h: r.maxy - r.miny + 1 },
+      bbox: { x: r.minx, y: r.miny, w: bw, h: bh },
     });
   }
 
