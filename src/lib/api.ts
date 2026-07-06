@@ -1,4 +1,3 @@
-import type { Plot } from "./plot";
 import type { ProjectRow } from "./db";
 
 export type ProjectPatch = Partial<

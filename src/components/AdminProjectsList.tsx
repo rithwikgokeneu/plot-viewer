@@ -26,23 +26,37 @@ export default function AdminProjectsList({ initial }: { initial: Item[] }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, natW: 1, natH: 1, plots: [] }),
     });
+    if (!res.ok) {
+      alert("Could not create project.");
+      return;
+    }
     const { project } = await res.json();
-    router.push(`/admin/${project.id}`);
+    if (project?.id) {
+      router.push(`/admin/${project.id}`);
+    }
   }
 
   async function togglePublish(it: Item) {
     const next = it.status === "published" ? "draft" : "published";
-    await fetch(`/api/projects/${it.id}`, {
+    const res = await fetch(`/api/projects/${it.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
+    if (!res.ok) {
+      alert("Action failed — please retry.");
+      return;
+    }
     setItems((xs) => xs.map((x) => (x.id === it.id ? { ...x, status: next } : x)));
   }
 
   async function remove(it: Item) {
     if (!confirm(`Delete "${it.name}"? This cannot be undone.`)) return;
-    await fetch(`/api/projects/${it.id}`, { method: "DELETE" });
+    const res = await fetch(`/api/projects/${it.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      alert("Action failed — please retry.");
+      return;
+    }
     setItems((xs) => xs.filter((x) => x.id !== it.id));
   }
 

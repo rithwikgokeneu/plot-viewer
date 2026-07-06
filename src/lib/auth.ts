@@ -9,6 +9,8 @@ export function signToken(secret: string): string {
 export function verifyToken(secret: string, token: string | undefined): boolean {
   if (!token) return false;
   const expected = signToken(secret);
-  if (token.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  const a = Buffer.from(token);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }

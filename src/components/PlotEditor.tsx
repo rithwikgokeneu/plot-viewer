@@ -40,8 +40,8 @@ export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, 
   const [plots, setPlots] = useState<Plot[]>(() =>
     initialPlots.map((p) => ({
       ...p,
-      polygon: denormPolygon(p.polygon, proc0(initialNat).w, proc0(initialNat).h),
-      centroid: denormPolygon([p.centroid], proc0(initialNat).w, proc0(initialNat).h)[0],
+      polygon: denormPolygon(p.polygon, proc.w, proc.h),
+      centroid: denormPolygon([p.centroid], proc.w, proc.h)[0],
     }))
   );
   const [threshold, setThreshold] = useState<number>(-1);
@@ -53,10 +53,6 @@ export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, 
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
   const imgRef = useRef<HTMLImageElement | null>(null);
-
-  function proc0(n: { w: number; h: number }) {
-    return fit(n.w || 1, n.h || 1, PROC_MAX, PROC_MAX);
-  }
 
   useEffect(() => {
     if (!initialImageUrl) return;
@@ -73,8 +69,12 @@ export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, 
         polygon: normPolygon(p.polygon, proc.w, proc.h),
         centroid: normCentroid(p.centroid, proc.w, proc.h),
       }));
-      await saveProjectPatch(projectId, { plots: normalized, natW: nat.w, natH: nat.h });
-      setSavedAt(Date.now());
+      try {
+        await saveProjectPatch(projectId, { plots: normalized, natW: nat.w, natH: nat.h });
+        setSavedAt(Date.now());
+      } catch {
+        setError("Couldn't save changes — check your connection and try again.");
+      }
     },
     [projectId, proc, nat]
   );
@@ -151,11 +151,13 @@ export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, 
             if (tileRes.ok) {
               const { dziUrl } = await tileRes.json();
               setDziUrl(dziUrl);
+              setError(null);
+            } else {
+              setError("Deep-zoom preparation failed — the map uploaded; use 'Replace map' to retry.");
             }
             setImgUrl(put.url);
             setSavedAt(Date.now());
             setBusy(null);
-            setError(null);
           } catch {
             setBusy(null);
             setError("Map upload failed — please try again.");
@@ -176,12 +178,18 @@ export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, 
 
   function redetect() {
     if (!imgRef.current) return;
+    setError(null);
     setBusy("Detecting plots…");
     setTimeout(async () => {
-      const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
-      setPlots(next);
-      await persist(next);
-      setBusy(null);
+      try {
+        const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
+        setPlots(next);
+        await persist(next);
+      } catch {
+        setError("Re-detect failed — please try again.");
+      } finally {
+        setBusy(null);
+      }
     }, 0);
   }
 
