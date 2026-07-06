@@ -23,6 +23,32 @@ function isHeic(file: File) {
   return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
 }
 
+// Estimate the plots' tilt (degrees, in (-45,45]) from the longest edge of each
+// detected polygon — used as the default rotation for newly drawn boxes.
+function estimateTilt(plots: Plot[]): number {
+  const angles: number[] = [];
+  for (const p of plots) {
+    const poly = p.polygon;
+    let bestLen = 0;
+    let bestAng = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len > bestLen) {
+        bestLen = len;
+        bestAng = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+      }
+    }
+    // fold into (-45, 45] since a rectangle repeats every 90deg
+    const folded = (((bestAng + 45) % 90) + 90) % 90 - 45;
+    angles.push(folded);
+  }
+  if (angles.length === 0) return 0;
+  angles.sort((a, b) => a - b);
+  return Math.round(angles[angles.length >> 1]);
+}
+
 export default function PlotEditor() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imageBlob, setImageBlob] = useState<Blob | null>(null);
@@ -38,6 +64,7 @@ export default function PlotEditor() {
   const [ocr, setOcr] = useState<{ done: number; total: number } | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [removeMode, setRemoveMode] = useState(false);
+  const [tilt, setTilt] = useState(0); // degrees, rotation for newly drawn boxes
 
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -60,6 +87,7 @@ export default function PlotEditor() {
       const d = fit(p.natW, p.natH, DISP_MAX_W, DISP_MAX_H);
       setDisp({ w: d.w, h: d.h });
       setPlots(p.plots);
+      setTilt(estimateTilt(p.plots));
       setSavedAt(p.updatedAt);
     })();
     return () => {
@@ -136,6 +164,7 @@ export default function PlotEditor() {
         setTimeout(async () => {
           const next = runDetect(image, pr.w, pr.h, threshold, invert);
           setPlots(next);
+          setTilt(estimateTilt(next));
           setSelectedId(null);
           // persist immediately with fresh sizes (state may not be applied yet)
           await saveProject({
@@ -164,6 +193,7 @@ export default function PlotEditor() {
     setTimeout(async () => {
       const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
       setPlots(next);
+      setTilt(estimateTilt(next));
       setSelectedId(null);
       await persist(next);
       setBusy(null);
@@ -360,6 +390,19 @@ export default function PlotEditor() {
           >
             {removeMode ? "Done removing" : "✕ Remove box"}
           </button>
+          {addMode && (
+            <label className="flex items-center gap-2 text-xs text-neutral-600">
+              Tilt
+              <input
+                type="range"
+                min={-45}
+                max={45}
+                value={tilt}
+                onChange={(e) => setTilt(Number(e.target.value))}
+              />
+              <span className="w-8 tabular-nums">{tilt}°</span>
+            </label>
+          )}
           {savedAt && (
             <span className="text-xs text-green-700">
               Published ✓ {new Date(savedAt).toLocaleTimeString()}
@@ -378,6 +421,7 @@ export default function PlotEditor() {
             selectedId={selectedId}
             addMode={addMode}
             onAddPlot={addPlot}
+            tilt={(tilt * Math.PI) / 180}
             onPlotClick={(id) => {
               if (removeMode) {
                 removePlot(id);

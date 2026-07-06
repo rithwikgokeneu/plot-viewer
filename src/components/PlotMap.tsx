@@ -17,6 +17,30 @@ interface Props {
   // When true, drag on the map to draw a new plot box (calls onAddPlot).
   addMode?: boolean;
   onAddPlot?: (polygon: Pt[]) => void;
+  // Rotation (radians) applied to a newly drawn box so it matches tilted plots.
+  tilt?: number;
+}
+
+// Four corners of the drag rectangle, rotated by `ang` around its center.
+function rotatedRect(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  ang: number
+): Pt[] {
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const hw = Math.abs(x1 - x0) / 2;
+  const hh = Math.abs(y1 - y0) / 2;
+  const cos = Math.cos(ang);
+  const sin = Math.sin(ang);
+  return [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ].map(([dx, dy]) => ({ x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos }));
 }
 
 // Shared map renderer: the layout image with a scaled SVG overlay of colored
@@ -35,6 +59,7 @@ export default function PlotMap({
   onPlotHover,
   addMode,
   onAddPlot,
+  tilt = 0,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
@@ -68,12 +93,7 @@ export default function PlotMap({
     const maxy = Math.max(draw.y0, draw.y1);
     setDraw(null);
     if (maxx - minx > 4 && maxy - miny > 4 && onAddPlot) {
-      onAddPlot([
-        { x: minx, y: miny },
-        { x: maxx, y: miny },
-        { x: maxx, y: maxy },
-        { x: minx, y: maxy },
-      ]);
+      onAddPlot(rotatedRect(minx, miny, maxx, maxy, tilt));
     }
   }
 
@@ -124,13 +144,12 @@ export default function PlotMap({
           );
         })}
 
-        {/* live preview of the box being drawn */}
+        {/* live preview of the (tilted) box being drawn */}
         {draw && (
-          <rect
-            x={Math.min(draw.x0, draw.x1)}
-            y={Math.min(draw.y0, draw.y1)}
-            width={Math.abs(draw.x1 - draw.x0)}
-            height={Math.abs(draw.y1 - draw.y0)}
+          <polygon
+            points={rotatedRect(draw.x0, draw.y0, draw.x1, draw.y1, tilt)
+              .map((p) => `${p.x},${p.y}`)
+              .join(" ")}
             fill="#2563eb"
             fillOpacity={0.2}
             stroke="#2563eb"
