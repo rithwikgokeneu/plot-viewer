@@ -26,8 +26,12 @@ export async function DELETE(
   const { id } = await params;
   const existing = await getProject(id);
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  const { blobs } = await list({ prefix: `projects/${id}/` });
-  if (blobs.length) await del(blobs.map((b) => b.url));
+  try {
+    const { blobs } = await list({ prefix: `projects/${id}/` });
+    if (blobs.length) await del(blobs.map((b) => b.url));
+  } catch (e) {
+    console.error(`blob cleanup failed for project ${id}, continuing with DB delete:`, e);
+  }
   await deleteProject(id);
   return NextResponse.json({ ok: true });
 }
