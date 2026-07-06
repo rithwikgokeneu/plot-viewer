@@ -44,6 +44,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
   const [invert, setInvert] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dziUrl, setDziUrl] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
@@ -98,8 +99,8 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
     []
   );
 
-  // NOTE: tiling/deep-zoom is wired in Task 12/13. The original image is
-  // uploaded straight to Blob below; only its URL round-trips through the DB.
+  // NOTE: the original image is uploaded to Blob, then tiled server-side into
+  // a DZI pyramid (also Blob-backed); dziUrl is consumed by DeepZoomMap in Task 13.
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -141,6 +142,12 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
               handleUploadUrl: "/api/blob/upload",
             });
             await saveProjectPatch(projectId, { imageUrl: put.url });
+            setBusy("Preparing deep zoom…");
+            const tileRes = await fetch(`/api/projects/${projectId}/tile`, { method: "POST" });
+            if (tileRes.ok) {
+              const { dziUrl } = await tileRes.json();
+              setDziUrl(dziUrl);
+            }
             setImgUrl(put.url);
             setSavedAt(Date.now());
             setBusy(null);

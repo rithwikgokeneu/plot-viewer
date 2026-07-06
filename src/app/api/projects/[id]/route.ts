@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { list, del } from "@vercel/blob";
 import { getProject, updateProject, deleteProject } from "@/lib/db";
 import type { ProjectRow } from "@/lib/db";
 
@@ -25,6 +26,8 @@ export async function DELETE(
   const { id } = await params;
   const existing = await getProject(id);
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const { blobs } = await list({ prefix: `projects/${id}/` });
+  if (blobs.length) await del(blobs.map((b) => b.url));
   await deleteProject(id);
   return NextResponse.json({ ok: true });
 }
