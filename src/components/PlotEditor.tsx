@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { detectPlots, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
-import DeepZoomMap from "@/components/DeepZoomMap";
+import dynamic from "next/dynamic";
 import { saveProjectPatch } from "@/lib/api";
 import { normPolygon, denormPolygon, normCentroid } from "@/lib/coords";
 import {
@@ -16,6 +16,8 @@ import {
   type Plot,
   type Status,
 } from "@/lib/plot";
+
+const DeepZoomMap = dynamic(() => import("@/components/DeepZoomMap"), { ssr: false });
 
 function isHeic(file: File) {
   return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
