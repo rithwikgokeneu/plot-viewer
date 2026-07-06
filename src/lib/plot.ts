@@ -1,4 +1,3 @@
-import { get, set, del } from "idb-keyval";
 import type { Pt } from "./detect";
 
 export type Status = "available" | "reserved" | "booked" | "sold";
@@ -10,32 +9,17 @@ export const STATUS: Record<Status, { label: string; color: string }> = {
   sold: { label: "Sold", color: "#dc2626" },
 };
 
-export const STATUS_ORDER: Status[] = [
-  "available",
-  "reserved",
-  "booked",
-  "sold",
-];
+export const STATUS_ORDER: Status[] = ["available", "reserved", "booked", "sold"];
 
 export interface Plot {
   id: number;
   num: string;
-  polygon: Pt[]; // detection (proc) coordinates
-  centroid: Pt;
+  polygon: Pt[]; // normalized 0..1 of each image axis
+  centroid: Pt; // normalized 0..1
   status: Status;
 }
 
-export interface Project {
-  image: Blob; // layout image, or a rendered white backdrop for CAD imports
-  natW: number;
-  natH: number;
-  procW: number; // detection resolution used for polygon coords
-  procH: number;
-  plots: Plot[];
-  updatedAt: number;
-}
-
-// Display and detection sizing. Bigger display => bigger blocks on screen.
+// Display and detection sizing.
 export const DISP_MAX_W = 900;
 export const DISP_MAX_H = 1250;
 export const PROC_MAX = 1600;
@@ -48,20 +32,6 @@ export function fit(
 ): { w: number; h: number; scale: number } {
   const scale = Math.min(maxW / w, maxH / h, 1);
   return { w: Math.round(w * scale), h: Math.round(h * scale), scale };
-}
-
-const KEY = "plot-project";
-
-export async function saveProject(p: Project): Promise<void> {
-  await set(KEY, p);
-}
-
-export async function loadProject(): Promise<Project | undefined> {
-  return get<Project>(KEY);
-}
-
-export async function clearProject(): Promise<void> {
-  await del(KEY);
 }
 
 export function countByStatus(plots: Plot[]): Record<Status, number> {
