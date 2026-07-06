@@ -3,17 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { detectPlots, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
+import { saveProjectPatch } from "@/lib/api";
+import { normPolygon, denormPolygon, normCentroid } from "@/lib/coords";
 import {
   PROC_MAX,
   STATUS,
   STATUS_ORDER,
   countByStatus,
   fit,
-  loadProject,
-  saveProject,
-  clearProject,
   type Plot,
-  type Project,
   type Status,
 } from "@/lib/plot";
 
@@ -21,115 +19,66 @@ function isHeic(file: File) {
   return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
 }
 
-// Orientation (radians) of a convex polygon's minimum-area bounding rectangle.
-function minAreaRectAngle(poly: Pt[]): number {
-  let bestArea = Infinity;
-  let bestAng = 0;
-  const n = poly.length;
-  for (let i = 0; i < n; i++) {
-    const a = poly[i];
-    const b = poly[(i + 1) % n];
-    const ang = Math.atan2(b.y - a.y, b.x - a.x);
-    const cos = Math.cos(-ang);
-    const sin = Math.sin(-ang);
-    let minx = Infinity;
-    let maxx = -Infinity;
-    let miny = Infinity;
-    let maxy = -Infinity;
-    for (const p of poly) {
-      const rx = p.x * cos - p.y * sin;
-      const ry = p.x * sin + p.y * cos;
-      if (rx < minx) minx = rx;
-      if (rx > maxx) maxx = rx;
-      if (ry < miny) miny = ry;
-      if (ry > maxy) maxy = ry;
-    }
-    const area = (maxx - minx) * (maxy - miny);
-    if (area < bestArea) {
-      bestArea = area;
-      bestAng = ang;
-    }
-  }
-  return bestAng;
+interface Props {
+  projectId: string;
+  initialImageUrl: string | null;
+  initialNat: { w: number; h: number };
+  initialPlots: Plot[]; // normalized 0..1
 }
 
-// Median min-area-rectangle angle (degrees, in (-45,45]) over detected plots.
-function estimateTilt(plots: Plot[]): number {
-  const angles: number[] = [];
-  for (const p of plots) {
-    if (p.polygon.length < 3) continue;
-    const deg = (minAreaRectAngle(p.polygon) * 180) / Math.PI;
-    angles.push(((((deg + 45) % 90) + 90) % 90) - 45);
-  }
-  if (angles.length === 0) return 0;
-  angles.sort((a, b) => a - b);
-  return Math.round(angles[angles.length >> 1]);
-}
-
-export default function PlotEditor() {
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
-  const [nat, setNat] = useState({ w: 0, h: 0 });
-  const [proc, setProc] = useState({ w: 0, h: 0 });
-  const [plots, setPlots] = useState<Plot[]>([]);
-  const [threshold, setThreshold] = useState<number>(-1); // -1 = auto (Otsu)
+export default function PlotEditor({ projectId, initialImageUrl, initialNat, initialPlots }: Props) {
+  const [imgUrl, setImgUrl] = useState<string | null>(initialImageUrl);
+  const [nat, setNat] = useState(initialNat);
+  // proc = detection resolution used for the legacy PlotMap overlay
+  const [proc, setProc] = useState(() => fit(initialNat.w || 1, initialNat.h || 1, PROC_MAX, PROC_MAX));
+  // Plots held in PROC coords for PlotMap; normalized on save.
+  const [plots, setPlots] = useState<Plot[]>(() =>
+    initialPlots.map((p) => ({
+      ...p,
+      polygon: denormPolygon(p.polygon, proc0(initialNat).w, proc0(initialNat).h),
+      centroid: denormPolygon([p.centroid], proc0(initialNat).w, proc0(initialNat).h)[0],
+    }))
+  );
+  const [threshold, setThreshold] = useState<number>(-1);
   const [invert, setInvert] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
-
   const imgRef = useRef<HTMLImageElement | null>(null);
 
+  function proc0(n: { w: number; h: number }) {
+    return fit(n.w || 1, n.h || 1, PROC_MAX, PROC_MAX);
+  }
+
   useEffect(() => {
-    let url: string | null = null;
-    (async () => {
-      const p = await loadProject();
-      if (!p) return;
-      url = URL.createObjectURL(p.image);
-      const image = new window.Image();
-      image.onload = () => {
-        imgRef.current = image;
-      };
-      image.src = url;
-      setImageBlob(p.image);
-      setImgUrl(url);
-      setNat({ w: p.natW, h: p.natH });
-      setProc({ w: p.procW, h: p.procH });
-      setPlots(p.plots);
-      setTilt(estimateTilt(p.plots));
-      setSavedAt(p.updatedAt);
-    })();
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, []);
+    if (!initialImageUrl) return;
+    const image = new window.Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => { imgRef.current = image; };
+    image.src = initialImageUrl;
+  }, [initialImageUrl]);
 
   const persist = useCallback(
     async (nextPlots: Plot[]) => {
-      if (!imageBlob) return;
-      const project: Project = {
-        image: imageBlob,
-        natW: nat.w,
-        natH: nat.h,
-        procW: proc.w,
-        procH: proc.h,
-        plots: nextPlots,
-        updatedAt: Date.now(),
-      };
-      await saveProject(project);
-      setSavedAt(project.updatedAt);
+      const normalized = nextPlots.map((p) => ({
+        ...p,
+        polygon: normPolygon(p.polygon, proc.w, proc.h),
+        centroid: normCentroid(p.centroid, proc.w, proc.h),
+      }));
+      await saveProjectPatch(projectId, { plots: normalized, natW: nat.w, natH: nat.h });
+      setSavedAt(Date.now());
     },
-    [imageBlob, nat, proc]
+    [projectId, proc, nat]
   );
 
   const runDetect = useCallback(
-    (image: HTMLImageElement, pw: number, ph: number, t: number, inv: boolean) => {
+    (image: HTMLImageElement, pw: number, ph: number, t: number, inv: boolean): Plot[] => {
       const canvas = document.createElement("canvas");
       canvas.width = pw;
       canvas.height = ph;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return [] as Plot[];
+      if (!ctx) return [];
       ctx.drawImage(image, 0, 0, pw, ph);
       const data = ctx.getImageData(0, 0, pw, ph);
       const found = detectPlots(
@@ -147,6 +96,8 @@ export default function PlotEditor() {
     []
   );
 
+  // NOTE: uploading the image to Blob + tiling is wired in Tasks 11/12.
+  // For now, load the image locally to run detection and save plots + dims.
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -164,25 +115,20 @@ export default function PlotEditor() {
       image.onload = () => {
         const pr = fit(image.width, image.height, PROC_MAX, PROC_MAX);
         imgRef.current = image;
-        setImageBlob(blob);
         setImgUrl(url);
         setNat({ w: image.width, h: image.height });
-        setProc({ w: pr.w, h: pr.h });
+        setProc({ w: pr.w, h: pr.h, scale: pr.scale });
         setAddMode(false);
         setBusy("Detecting plots…");
         setTimeout(async () => {
           const next = runDetect(image, pr.w, pr.h, threshold, invert);
           setPlots(next);
-          setTilt(estimateTilt(next));
-          await saveProject({
-            image: blob,
-            natW: image.width,
-            natH: image.height,
-            procW: pr.w,
-            procH: pr.h,
-            plots: next,
-            updatedAt: Date.now(),
-          });
+          const normalized = next.map((p) => ({
+            ...p,
+            polygon: normPolygon(p.polygon, pr.w, pr.h),
+            centroid: normCentroid(p.centroid, pr.w, pr.h),
+          }));
+          await saveProjectPatch(projectId, { plots: normalized, natW: image.width, natH: image.height });
           setSavedAt(Date.now());
           setBusy(null);
         }, 0);
@@ -201,31 +147,21 @@ export default function PlotEditor() {
     setTimeout(async () => {
       const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
       setPlots(next);
-      setTilt(estimateTilt(next));
       await persist(next);
       setBusy(null);
     }, 0);
   }
 
   function addPlot(polygon: Pt[]) {
-    let cx = 0;
-    let cy = 0;
-    for (const pt of polygon) {
-      cx += pt.x;
-      cy += pt.y;
-    }
+    let cx = 0, cy = 0;
+    for (const pt of polygon) { cx += pt.x; cy += pt.y; }
     setPlots((prev) => {
       const nextId = prev.reduce((m, p) => Math.max(m, p.id), 0) + 1;
-      const next = [
-        ...prev,
-        {
-          id: nextId,
-          num: "",
-          polygon,
-          centroid: { x: cx / polygon.length, y: cy / polygon.length },
-          status: "available" as Status,
-        },
-      ];
+      const next = [...prev, {
+        id: nextId, num: "", polygon,
+        centroid: { x: cx / polygon.length, y: cy / polygon.length },
+        status: "available" as Status,
+      }];
       void persist(next);
       return next;
     });
@@ -247,80 +183,41 @@ export default function PlotEditor() {
     });
   }
 
-  async function resetAll() {
-    await clearProject();
-    if (imgUrl) URL.revokeObjectURL(imgUrl);
-    imgRef.current = null;
-    setImgUrl(null);
-    setImageBlob(null);
-    setPlots([]);
-    setAddMode(false);
-    setSavedAt(null);
-  }
-
   const counts = countByStatus(plots);
 
-  // Empty state: prominent upload.
   if (!imgUrl) {
     return (
       <label className="mx-auto flex max-w-xl cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-neutral-300 bg-neutral-50 p-12 text-center hover:border-blue-400 hover:bg-blue-50/40">
-        <span className="text-lg font-medium text-neutral-700">
-          {busy ?? "Upload a plot layout map"}
-        </span>
-        <span className="text-sm text-neutral-500">
-          PNG, JPG, or HEIC. Plots are detected automatically.
-        </span>
-        <span className="mt-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">
-          Choose file
-        </span>
-        <input
-          type="file"
-          accept="image/*,.heic,.heif"
-          onChange={onFile}
-          className="hidden"
-        />
+        <span className="text-lg font-medium text-neutral-700">{busy ?? "Upload a plot layout map"}</span>
+        <span className="text-sm text-neutral-500">PNG, JPG, or HEIC. Plots are detected automatically.</span>
+        <span className="mt-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">Choose file</span>
+        <input type="file" accept="image/*,.heic,.heif" onChange={onFile} className="hidden" />
       </label>
     );
   }
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-      {/* Map + toolbar */}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setAddMode((v) => !v)}
-            className={`rounded px-3 py-2 text-sm font-medium ${
-              addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"
-            }`}
+            className={`rounded px-3 py-2 text-sm font-medium ${addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"}`}
           >
             {addMode ? "Done adding" : "+ Add plot box"}
           </button>
-
           {addMode && (
             <label className="flex items-center gap-2 rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-600">
               Tilt
-              <input
-                type="range"
-                min={-45}
-                max={45}
-                value={tilt}
-                onChange={(e) => setTilt(Number(e.target.value))}
-              />
+              <input type="range" min={-45} max={45} value={tilt} onChange={(e) => setTilt(Number(e.target.value))} />
               <span className="w-8 tabular-nums">{tilt}°</span>
             </label>
           )}
-
           <span className="ml-auto flex items-center gap-3 text-xs text-neutral-500">
-            {savedAt && <span className="text-green-700">Published ✓</span>}
+            {savedAt && <span className="text-green-700">Saved ✓</span>}
             <label className="cursor-pointer underline hover:text-neutral-800">
               Replace map
-              <input
-                type="file"
-                accept="image/*,.heic,.heif"
-                onChange={onFile}
-                className="hidden"
-              />
+              <input type="file" accept="image/*,.heic,.heif" onChange={onFile} className="hidden" />
             </label>
           </span>
         </div>
@@ -339,12 +236,11 @@ export default function PlotEditor() {
 
         <p className="text-xs text-neutral-500">
           {addMode
-            ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
-            : "Click a plot to set its status or delete it. Use “+ Add plot box” to draw a missed one. Changes publish automatically."}
+            ? "Add mode: drag a box around a plot the detector missed."
+            : "Click a plot to set its status or delete it. Changes save automatically."}
         </p>
       </div>
 
-      {/* Side panel */}
       <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
         <div className="rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
@@ -354,10 +250,7 @@ export default function PlotEditor() {
           <div className="flex flex-col gap-2">
             {STATUS_ORDER.map((s) => (
               <div key={s} className="flex items-center gap-2">
-                <span
-                  className="inline-block h-3.5 w-3.5 rounded-sm"
-                  style={{ backgroundColor: STATUS[s].color }}
-                />
+                <span className="inline-block h-3.5 w-3.5 rounded-sm" style={{ backgroundColor: STATUS[s].color }} />
                 <span className="text-neutral-600">{STATUS[s].label}</span>
                 <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
               </div>
@@ -369,40 +262,16 @@ export default function PlotEditor() {
           <summary className="cursor-pointer font-semibold">Detection settings</summary>
           <div className="mt-3 flex flex-col gap-3">
             <label className="flex items-center justify-between gap-2">
-              <span className="text-neutral-600">
-                Sensitivity {threshold < 0 ? "(auto)" : threshold}
-              </span>
-              <input
-                type="range"
-                min={-1}
-                max={255}
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-              />
+              <span className="text-neutral-600">Sensitivity {threshold < 0 ? "(auto)" : threshold}</span>
+              <input type="range" min={-1} max={255} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
             </label>
             <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={invert}
-                onChange={(e) => setInvert(e.target.checked)}
-              />
+              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
               <span className="text-neutral-600">Invert (plots darker than background)</span>
             </label>
-            <div className="flex gap-2">
-              <button
-                onClick={redetect}
-                disabled={!!busy}
-                className="flex-1 rounded bg-neutral-800 px-3 py-2 text-white disabled:opacity-40"
-              >
-                {busy ?? "Re-detect"}
-              </button>
-              <button
-                onClick={resetAll}
-                className="rounded border border-neutral-300 px-3 py-2 text-neutral-700"
-              >
-                Reset
-              </button>
-            </div>
+            <button onClick={redetect} disabled={!!busy} className="rounded bg-neutral-800 px-3 py-2 text-white disabled:opacity-40">
+              {busy ?? "Re-detect"}
+            </button>
           </div>
         </details>
       </div>
