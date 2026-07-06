@@ -122,25 +122,29 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
         setAddMode(false);
         setBusy("Detecting plots…");
         setTimeout(async () => {
-          const next = runDetect(image, pr.w, pr.h, threshold, invert);
-          setPlots(next);
-          const normalized = next.map((p) => ({
-            ...p,
-            polygon: normPolygon(p.polygon, pr.w, pr.h),
-            centroid: normCentroid(p.centroid, pr.w, pr.h),
-          }));
-          await saveProjectPatch(projectId, { plots: normalized, natW: image.width, natH: image.height });
+          try {
+            const next = runDetect(image, pr.w, pr.h, threshold, invert);
+            setPlots(next);
+            const normalized = next.map((p) => ({
+              ...p,
+              polygon: normPolygon(p.polygon, pr.w, pr.h),
+              centroid: normCentroid(p.centroid, pr.w, pr.h),
+            }));
+            await saveProjectPatch(projectId, { plots: normalized, natW: image.width, natH: image.height });
 
-          setBusy("Uploading map…");
-          const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
-          const put = await upload(`projects/${projectId}/original.${ext}`, blob, {
-            access: "public",
-            handleUploadUrl: "/api/blob/upload",
-          });
-          await saveProjectPatch(projectId, { imageUrl: put.url });
-          setImgUrl(put.url);
-          setSavedAt(Date.now());
-          setBusy(null);
+            setBusy("Uploading map…");
+            const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+            const put = await upload(`projects/${projectId}/original.${ext}`, blob, {
+              access: "public",
+              handleUploadUrl: "/api/blob/upload",
+            });
+            await saveProjectPatch(projectId, { imageUrl: put.url });
+            setImgUrl(put.url);
+            setSavedAt(Date.now());
+            setBusy(null);
+          } catch {
+            setBusy("Map upload failed — please try again.");
+          }
         }, 0);
       };
       image.onerror = () => setBusy("Could not load that image.");
@@ -201,7 +205,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
         <span className="text-lg font-medium text-neutral-700">{busy ?? "Upload a plot layout map"}</span>
         <span className="text-sm text-neutral-500">PNG, JPG, or HEIC. Plots are detected automatically.</span>
         <span className="mt-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">Choose file</span>
-        <input type="file" accept="image/*,.heic,.heif" onChange={onFile} className="hidden" />
+        <input type="file" accept="image/*,.heic,.heif" onChange={onFile} disabled={!!busy} className="hidden" />
       </label>
     );
   }
@@ -227,7 +231,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
             {savedAt && <span className="text-green-700">Saved ✓</span>}
             <label className="cursor-pointer underline hover:text-neutral-800">
               Replace map
-              <input type="file" accept="image/*,.heic,.heif" onChange={onFile} className="hidden" />
+              <input type="file" accept="image/*,.heic,.heif" onChange={onFile} disabled={!!busy} className="hidden" />
             </label>
           </span>
         </div>
