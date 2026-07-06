@@ -184,6 +184,20 @@ Each phase is independently shippable and testable.
 - Map zooms deeply and stays crisp; polygons stay aligned and crisp at all zoom levels.
 - Public and admin views are usable and clean on a phone.
 
-## 10. Open Questions
+## 10. Roadmap / North Star (deferred)
+
+A broader product vision exists (`~/Downloads/3d_real_estate_plot_viewer_plan.md`) — an interactive **3D** plot-sales SaaS with CRM. This 2D engine is deliberately Phase 0: the accurate 2D plot polygons it produces are the foundation the 3D layer would extrude from. Confirmed 2026-07-06 to build the 2D engine now and treat that doc as the roadmap. Deferred from it:
+
+- **3D viewer** (Three.js / React Three Fiber) — extrude plots from the same normalized polygons.
+- **Rich plot metadata** — length/width, area (sqft/sqyd), facing, road width, **price**, buyer name/phone.
+- **Scale calibration** — mark a known distance (e.g. 30 ft road) → px→feet → auto area.
+- **Leads / CRM** — buyer enquiries, WhatsApp enquiry button, export.
+- **Sharing extras** — QR code, embeddable viewer.
+- **Multi-user** — accounts, roles, agent/broker assignment (supersedes single-operator auth).
+- **Analytics** — plot views / most-clicked heatmaps.
+
+The current single-table model extends cleanly: extra plot fields are new JSONB keys; leads/analytics/users become new tables when their phase arrives.
+
+## 11. Open Questions
 
 None blocking. Domain wiring (Namecheap) and Vercel plan tier (if tiling hits limits) are deferred operational steps, not design unknowns.
