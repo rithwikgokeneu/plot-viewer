@@ -1,100 +1,106 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import PlotMap from "@/components/PlotMap";
-import {
-  STATUS,
-  STATUS_ORDER,
-  countByStatus,
-  loadProject,
-  type Plot,
-} from "@/lib/plot";
+import { useState } from "react";
+import dynamic from "next/dynamic";
+import { STATUS, STATUS_ORDER, countByStatus, type Plot } from "@/lib/plot";
 
-export default function PublicViewer() {
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [proc, setProc] = useState({ w: 0, h: 0 });
-  const [plots, setPlots] = useState<Plot[]>([]);
+// SSR-safe: OpenSeadragon (via DeepZoomMap) touches `document` at module load,
+// which would 500 this server-rendered page. Load client-side only — mirrors
+// the fix already applied to PlotEditor.tsx for the same reason.
+const DeepZoomMap = dynamic(() => import("@/components/DeepZoomMap"), { ssr: false });
+
+interface Props {
+  name: string;
+  dziUrl: string;
+  natW: number;
+  natH: number;
+  plots: Plot[]; // normalized
+}
+
+// `name` is part of the contract (the page passes project.name) but the
+// page itself renders the <h1>; PublicViewer doesn't need to repeat it.
+export default function PublicViewer({ dziUrl, natW, natH, plots }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let url: string | null = null;
-    (async () => {
-      const p = await loadProject();
-      if (p) {
-        url = URL.createObjectURL(p.image);
-        setImgUrl(url);
-        setProc({ w: p.procW, h: p.procH });
-        setPlots(p.plots);
-      }
-      setLoaded(true);
-    })();
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, []);
-
   const counts = countByStatus(plots);
   const selected = plots.find((p) => p.id === selectedId) || null;
-
-  if (loaded && !imgUrl) {
-    return (
-      <div className="rounded-lg border border-neutral-200 p-8 text-center text-neutral-600">
-        No layout published yet. The project admin needs to upload and publish a
-        plot map.
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-1">
-        {imgUrl && (
-          <PlotMap
-            imgUrl={imgUrl}
-            procW={proc.w}
-            procH={proc.h}
-            plots={plots}
-            selectedId={selectedId}
-            onSelect={(id) => setSelectedId(id)}
-          />
-        )}
+        <DeepZoomMap
+          dziUrl={dziUrl}
+          natW={natW}
+          natH={natH}
+          plots={plots}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
       </div>
 
-      <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
+      {/* Desktop sidebar */}
+      <aside className="hidden w-72 shrink-0 flex-col gap-4 text-sm lg:flex">
         <div className="rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="font-semibold">Availability</h2>
             <span className="text-3xl font-bold">{plots.length}</span>
           </div>
-          <div className="flex flex-col gap-2">
-            {STATUS_ORDER.map((s) => (
-              <div key={s} className="flex items-center gap-2">
-                <span
-                  className="inline-block h-3.5 w-3.5 rounded-sm"
-                  style={{ backgroundColor: STATUS[s].color }}
-                />
-                <span className="text-neutral-600">{STATUS[s].label}</span>
-                <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
-              </div>
-            ))}
-          </div>
+          <Legend counts={counts} />
         </div>
-
         <div className="rounded-lg border border-neutral-200 p-4">
           <h3 className="mb-2 font-semibold">Selected plot</h3>
-          {selected ? (
-            <span
-              className="inline-block rounded px-2 py-1 text-xs font-medium text-white"
-              style={{ backgroundColor: STATUS[selected.status].color }}
-            >
-              {STATUS[selected.status].label}
-            </span>
-          ) : (
-            <p className="text-neutral-500">Tap a plot on the map.</p>
-          )}
+          {selected ? <StatusBadge plot={selected} /> : <p className="text-neutral-500">Tap a plot on the map.</p>}
         </div>
+      </aside>
+
+      {/* Mobile: compact legend strip + bottom sheet on selection */}
+      <div className="flex flex-wrap gap-3 rounded-lg border border-neutral-200 p-3 text-xs lg:hidden">
+        <span className="font-semibold">{plots.length} plots</span>
+        {STATUS_ORDER.map((s) => (
+          <span key={s} className="flex items-center gap-1">
+            <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: STATUS[s].color }} />
+            {counts[s]}
+          </span>
+        ))}
       </div>
+      {selected && (
+        <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t border-neutral-200 bg-white p-4 shadow-2xl lg:hidden">
+          <div>
+            <p className="text-xs text-neutral-500">Plot {selected.num || selected.id}</p>
+            <StatusBadge plot={selected} />
+          </div>
+          <button
+            onClick={() => setSelectedId(null)}
+            className="min-h-11 min-w-11 rounded border border-neutral-300 px-3 py-2 text-sm"
+          >
+            Close
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Legend({ counts }: { counts: Record<string, number> }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {STATUS_ORDER.map((s) => (
+        <div key={s} className="flex items-center gap-2">
+          <span className="inline-block h-3.5 w-3.5 rounded-sm" style={{ backgroundColor: STATUS[s].color }} />
+          <span className="text-neutral-600">{STATUS[s].label}</span>
+          <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadge({ plot }: { plot: Plot }) {
+  return (
+    <span
+      className="inline-block rounded px-2 py-1 text-xs font-medium text-white"
+      style={{ backgroundColor: STATUS[plot.status].color }}
+    >
+      {STATUS[plot.status].label}
+    </span>
   );
 }
