@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { detectPlots, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
 import { saveProjectPatch } from "@/lib/api";
@@ -96,8 +97,8 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
     []
   );
 
-  // NOTE: uploading the image to Blob + tiling is wired in Tasks 11/12.
-  // For now, load the image locally to run detection and save plots + dims.
+  // NOTE: tiling/deep-zoom is wired in Task 12/13. The original image is
+  // uploaded straight to Blob below; only its URL round-trips through the DB.
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -129,6 +130,15 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
             centroid: normCentroid(p.centroid, pr.w, pr.h),
           }));
           await saveProjectPatch(projectId, { plots: normalized, natW: image.width, natH: image.height });
+
+          setBusy("Uploading map…");
+          const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          const put = await upload(`projects/${projectId}/original.${ext}`, blob, {
+            access: "public",
+            handleUploadUrl: "/api/blob/upload",
+          });
+          await saveProjectPatch(projectId, { imageUrl: put.url });
+          setImgUrl(put.url);
           setSavedAt(Date.now());
           setBusy(null);
         }, 0);
