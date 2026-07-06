@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { detectPlots, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
+import DeepZoomMap from "@/components/DeepZoomMap";
 import { saveProjectPatch } from "@/lib/api";
 import { normPolygon, denormPolygon, normCentroid } from "@/lib/coords";
 import {
@@ -23,11 +24,12 @@ function isHeic(file: File) {
 interface Props {
   projectId: string;
   initialImageUrl: string | null;
+  initialDziUrl: string | null;
   initialNat: { w: number; h: number };
   initialPlots: Plot[]; // normalized 0..1
 }
 
-export default function PlotEditor({ projectId, initialImageUrl, initialNat, initialPlots }: Props) {
+export default function PlotEditor({ projectId, initialImageUrl, initialDziUrl, initialNat, initialPlots }: Props) {
   const [imgUrl, setImgUrl] = useState<string | null>(initialImageUrl);
   const [nat, setNat] = useState(initialNat);
   // proc = detection resolution used for the legacy PlotMap overlay
@@ -44,7 +46,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
   const [invert, setInvert] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dziUrl, setDziUrl] = useState<string | null>(null);
+  const [dziUrl, setDziUrl] = useState<string | null>(initialDziUrl);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
@@ -254,21 +256,43 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
           </span>
         </div>
 
-        <PlotMap
-          imgUrl={imgUrl}
-          procW={proc.w}
-          procH={proc.h}
-          plots={plots}
-          onSetStatus={setStatus}
-          onDeletePlot={removePlot}
-          addMode={addMode}
-          onAddPlot={addPlot}
-          tilt={(tilt * Math.PI) / 180}
-        />
+        {dziUrl ? (
+          <DeepZoomMap
+            dziUrl={dziUrl}
+            natW={nat.w}
+            natH={nat.h}
+            plots={plots.map((p) => ({
+              ...p,
+              polygon: normPolygon(p.polygon, proc.w, proc.h),
+              centroid: normCentroid(p.centroid, proc.w, proc.h),
+            }))}
+            onSetStatus={setStatus}
+            onDeletePlot={removePlot}
+            addMode={addMode}
+            onAddPlot={(normPoly) => addPlot(denormPolygon(normPoly, proc.w, proc.h))}
+          />
+        ) : (
+          <>
+            <p className="text-xs text-amber-700">Preparing deep zoom… showing the standard map meanwhile.</p>
+            <PlotMap
+              imgUrl={imgUrl}
+              procW={proc.w}
+              procH={proc.h}
+              plots={plots}
+              onSetStatus={setStatus}
+              onDeletePlot={removePlot}
+              addMode={addMode}
+              onAddPlot={addPlot}
+              tilt={(tilt * Math.PI) / 180}
+            />
+          </>
+        )}
 
         <p className="text-xs text-neutral-500">
           {addMode
-            ? "Add mode: drag a box around a plot the detector missed."
+            ? dziUrl
+              ? "Add mode: click a spot the detector missed to drop a plot box there."
+              : "Add mode: drag a box around a plot the detector missed."
             : "Click a plot to set its status or delete it. Changes save automatically."}
         </p>
       </div>
