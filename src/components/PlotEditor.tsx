@@ -23,26 +23,51 @@ function isHeic(file: File) {
   return /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
 }
 
-// Estimate the plots' tilt (degrees, in (-45,45]) from the longest edge of each
-// detected polygon — used as the default rotation for newly drawn boxes.
+// Orientation (radians) of a convex polygon's minimum-area bounding rectangle.
+// By the rotating-calipers theorem that rectangle shares an edge with the
+// polygon, so we test each edge's direction and keep the tightest fit. For a
+// (tilted) rectangular plot this recovers its true tilt.
+function minAreaRectAngle(poly: Pt[]): number {
+  let bestArea = Infinity;
+  let bestAng = 0;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % n];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const cos = Math.cos(-ang);
+    const sin = Math.sin(-ang);
+    let minx = Infinity;
+    let maxx = -Infinity;
+    let miny = Infinity;
+    let maxy = -Infinity;
+    for (const p of poly) {
+      const rx = p.x * cos - p.y * sin;
+      const ry = p.x * sin + p.y * cos;
+      if (rx < minx) minx = rx;
+      if (rx > maxx) maxx = rx;
+      if (ry < miny) miny = ry;
+      if (ry > maxy) maxy = ry;
+    }
+    const area = (maxx - minx) * (maxy - miny);
+    if (area < bestArea) {
+      bestArea = area;
+      bestAng = ang;
+    }
+  }
+  return bestAng;
+}
+
+// Estimate the plots' tilt (degrees, in (-45,45]) as the median orientation of
+// each detected plot's minimum-area rectangle — used as the default rotation
+// for newly drawn boxes so they match the layout automatically.
 function estimateTilt(plots: Plot[]): number {
   const angles: number[] = [];
   for (const p of plots) {
-    const poly = p.polygon;
-    let bestLen = 0;
-    let bestAng = 0;
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i];
-      const b = poly[(i + 1) % poly.length];
-      const len = Math.hypot(b.x - a.x, b.y - a.y);
-      if (len > bestLen) {
-        bestLen = len;
-        bestAng = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-      }
-    }
+    if (p.polygon.length < 3) continue;
+    const deg = (minAreaRectAngle(p.polygon) * 180) / Math.PI;
     // fold into (-45, 45] since a rectangle repeats every 90deg
-    const folded = (((bestAng + 45) % 90) + 90) % 90 - 45;
-    angles.push(folded);
+    angles.push(((((deg + 45) % 90) + 90) % 90) - 45);
   }
   if (angles.length === 0) return 0;
   angles.sort((a, b) => a - b);
