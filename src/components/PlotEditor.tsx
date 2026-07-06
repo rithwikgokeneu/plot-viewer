@@ -37,6 +37,7 @@ export default function PlotEditor() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [ocr, setOcr] = useState<{ done: number; total: number } | null>(null);
   const [addMode, setAddMode] = useState(false);
+  const [removeMode, setRemoveMode] = useState(false);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -332,7 +333,10 @@ export default function PlotEditor() {
             />
           </label>
           <button
-            onClick={() => setAddMode((v) => !v)}
+            onClick={() => {
+              setAddMode((v) => !v);
+              setRemoveMode(false);
+            }}
             disabled={!imgUrl}
             className={`rounded px-3 py-2 text-sm font-medium disabled:opacity-40 ${
               addMode
@@ -341,6 +345,20 @@ export default function PlotEditor() {
             }`}
           >
             {addMode ? "Done adding" : "+ Add plot box"}
+          </button>
+          <button
+            onClick={() => {
+              setRemoveMode((v) => !v);
+              setAddMode(false);
+            }}
+            disabled={!imgUrl}
+            className={`rounded px-3 py-2 text-sm font-medium disabled:opacity-40 ${
+              removeMode
+                ? "bg-red-600 text-white"
+                : "border border-red-600 text-red-700"
+            }`}
+          >
+            {removeMode ? "Done removing" : "✕ Remove box"}
           </button>
           {savedAt && (
             <span className="text-xs text-green-700">
@@ -361,8 +379,12 @@ export default function PlotEditor() {
             addMode={addMode}
             onAddPlot={addPlot}
             onPlotClick={(id) => {
-              setSelectedId(id);
-              toggleSold(id);
+              if (removeMode) {
+                removePlot(id);
+              } else {
+                setSelectedId(id);
+                toggleSold(id);
+              }
             }}
             onPlotHover={(id) => setSelectedId(id)}
           />
@@ -379,7 +401,9 @@ export default function PlotEditor() {
           <p className="max-w-[900px] text-xs text-neutral-500">
             {addMode
               ? "Add mode: drag a box around a plot the detector missed. Click “Done adding” when finished."
-              : "Click a plot to toggle Available ↔ Sold. Use the list for Reserved / Booked or ✕ to remove a wrong box. “+ Add plot box” lets you draw a missing one. Changes publish automatically."}
+              : removeMode
+                ? "Remove mode: click any box on the map to delete it. Click “Done removing” when finished."
+                : "Click a plot to toggle Available ↔ Sold. Use the list dropdown for Reserved / Booked. “✕ Remove box” then click boxes to delete; “+ Add plot box” to draw a missing one. Changes publish automatically."}
           </p>
         )}
       </div>
