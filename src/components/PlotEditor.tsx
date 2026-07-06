@@ -43,6 +43,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
   const [threshold, setThreshold] = useState<number>(-1);
   const [invert, setInvert] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
@@ -102,6 +103,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setError(null);
     setBusy("Loading image…");
     try {
       let blob: Blob = file;
@@ -142,15 +144,21 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
             setImgUrl(put.url);
             setSavedAt(Date.now());
             setBusy(null);
+            setError(null);
           } catch {
-            setBusy("Map upload failed — please try again.");
+            setBusy(null);
+            setError("Map upload failed — please try again.");
           }
         }, 0);
       };
-      image.onerror = () => setBusy("Could not load that image.");
+      image.onerror = () => {
+        setBusy(null);
+        setError("Could not load that image.");
+      };
       image.src = url;
     } catch {
-      setBusy("HEIC conversion failed — try a PNG or JPG.");
+      setBusy(null);
+      setError("HEIC conversion failed — try a PNG or JPG.");
     }
     e.target.value = "";
   }
@@ -202,7 +210,9 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
   if (!imgUrl) {
     return (
       <label className="mx-auto flex max-w-xl cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-neutral-300 bg-neutral-50 p-12 text-center hover:border-blue-400 hover:bg-blue-50/40">
-        <span className="text-lg font-medium text-neutral-700">{busy ?? "Upload a plot layout map"}</span>
+        <span className={`text-lg font-medium ${!busy && error ? "text-red-600" : "text-neutral-700"}`}>
+          {busy ?? error ?? "Upload a plot layout map"}
+        </span>
         <span className="text-sm text-neutral-500">PNG, JPG, or HEIC. Plots are detected automatically.</span>
         <span className="mt-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white">Choose file</span>
         <input type="file" accept="image/*,.heic,.heif" onChange={onFile} disabled={!!busy} className="hidden" />
@@ -229,6 +239,7 @@ export default function PlotEditor({ projectId, initialImageUrl, initialNat, ini
           )}
           <span className="ml-auto flex items-center gap-3 text-xs text-neutral-500">
             {savedAt && <span className="text-green-700">Saved ✓</span>}
+            {error && <span className="text-red-600">{error}</span>}
             <label className="cursor-pointer underline hover:text-neutral-800">
               Replace map
               <input type="file" accept="image/*,.heic,.heif" onChange={onFile} disabled={!!busy} className="hidden" />
