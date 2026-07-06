@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { detectPlots, toGray, otsuThreshold } from "@/lib/detect";
+import { detectPlots, toGray, otsuThreshold, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
 import {
   DISP_MAX_W,
@@ -36,6 +36,7 @@ export default function PlotEditor() {
   const [busy, setBusy] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [ocr, setOcr] = useState<{ done: number; total: number } | null>(null);
+  const [addMode, setAddMode] = useState(false);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -166,6 +167,31 @@ export default function PlotEditor() {
       await persist(next);
       setBusy(null);
     }, 0);
+  }
+
+  // Add a manually-drawn box as a new plot (for plots the detector missed).
+  function addPlot(polygon: Pt[]) {
+    let cx = 0;
+    let cy = 0;
+    for (const pt of polygon) {
+      cx += pt.x;
+      cy += pt.y;
+    }
+    setPlots((prev) => {
+      const nextId = prev.reduce((m, p) => Math.max(m, p.id), 0) + 1;
+      const next = [
+        ...prev,
+        {
+          id: nextId,
+          num: "",
+          polygon,
+          centroid: { x: cx / polygon.length, y: cy / polygon.length },
+          status: "available" as Status,
+        },
+      ];
+      void persist(next);
+      return next;
+    });
   }
 
   // Read the printed number inside each plot via OCR. Crops the central ~70%
@@ -305,6 +331,17 @@ export default function PlotEditor() {
               className="hidden"
             />
           </label>
+          <button
+            onClick={() => setAddMode((v) => !v)}
+            disabled={!imgUrl}
+            className={`rounded px-3 py-2 text-sm font-medium disabled:opacity-40 ${
+              addMode
+                ? "bg-blue-600 text-white"
+                : "border border-blue-600 text-blue-700"
+            }`}
+          >
+            {addMode ? "Done adding" : "+ Add plot box"}
+          </button>
           {savedAt && (
             <span className="text-xs text-green-700">
               Published ✓ {new Date(savedAt).toLocaleTimeString()}
@@ -321,6 +358,8 @@ export default function PlotEditor() {
             procH={proc.h}
             plots={plots}
             selectedId={selectedId}
+            addMode={addMode}
+            onAddPlot={addPlot}
             onPlotClick={(id) => {
               setSelectedId(id);
               toggleSold(id);
@@ -338,10 +377,9 @@ export default function PlotEditor() {
 
         {imgUrl && (
           <p className="max-w-[900px] text-xs text-neutral-500">
-            Click a plot to toggle Available ↔ Sold. Use the list for Reserved /
-            Booked or ✕ to remove a false detection. Changes publish
-            automatically. If plots merge or decorations get detected, adjust
-            Sensitivity / Invert and Re-detect.
+            {addMode
+              ? "Add mode: drag a box around a plot the detector missed. Click “Done adding” when finished."
+              : "Click a plot to toggle Available ↔ Sold. Use the list for Reserved / Booked or ✕ to remove a wrong box. “+ Add plot box” lets you draw a missing one. Changes publish automatically."}
           </p>
         )}
       </div>
