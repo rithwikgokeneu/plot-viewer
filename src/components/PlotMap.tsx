@@ -162,7 +162,7 @@ export default function PlotMap({
           {STATUS_ORDER.map((s) => (
             <button
               key={s}
-              title={STATUS[s].label}
+              title={`Set ${STATUS[s].label}`}
               onClick={() => {
                 onSetStatus?.(menu.id, s);
                 setMenu(null);
@@ -171,15 +171,16 @@ export default function PlotMap({
               style={{ backgroundColor: STATUS[s].color }}
             />
           ))}
+          <span className="mx-0.5 h-6 w-px bg-neutral-200" />
           <button
             title="Delete this box"
             onClick={() => {
               onDeletePlot?.(menu.id);
               setMenu(null);
             }}
-            className="flex h-6 w-6 items-center justify-center rounded border border-neutral-300 text-neutral-500 hover:bg-red-50 hover:text-red-600"
+            className="flex h-6 items-center gap-1 rounded bg-red-50 px-2 text-xs font-medium text-red-600 hover:bg-red-100"
           >
-            ✕
+            🗑 Delete
           </button>
         </div>
       )}
