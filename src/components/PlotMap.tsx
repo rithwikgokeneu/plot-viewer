@@ -19,6 +19,9 @@ interface Props {
   addMode?: boolean;
   onAddPlot?: (polygon: Pt[]) => void;
   tilt?: number;
+  // Edit mode: select a box, drag its corners to resize or its body to move.
+  editMode?: boolean;
+  onUpdateBox?: (id: number, box: Pt[]) => void;
 }
 
 // Four corners of the drag rectangle, rotated by `ang` around its center.
@@ -86,6 +89,11 @@ function plotBox(poly: Pt[]): Pt[] {
   return expand(minAreaRect(poly), 1.12);
 }
 
+// A plot's current box: the user-edited corners if set, else the derived box.
+function boxOf(p: Plot): Pt[] {
+  return p.box && p.box.length === 4 ? p.box : plotBox(p.polygon);
+}
+
 export default function PlotMap({
   imgUrl,
   procW,
@@ -98,11 +106,19 @@ export default function PlotMap({
   addMode,
   onAddPlot,
   tilt = 0,
+  editMode,
+  onUpdateBox,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [menu, setMenu] = useState<{ id: number; xPct: number; yPct: number } | null>(null);
+  // Edit mode: which box is selected, and the live drag session.
+  const [editId, setEditId] = useState<number | null>(null);
+  const [drag, setDrag] = useState<{ id: number; mode: "move" | "corner"; corner: number; start: Pt; orig: Pt[] } | null>(null);
+  const [draftBox, setDraftBox] = useState<Pt[] | null>(null);
   const isAdmin = !!onSetStatus;
+  // Handle size in proc units, so grab targets stay usable at any display scale.
+  const handleR = Math.max(procW, procH) * 0.011;
 
   function toProc(e: React.MouseEvent): Pt {
     const r = svgRef.current!.getBoundingClientRect();
@@ -112,29 +128,67 @@ export default function PlotMap({
     };
   }
 
+  // Begin dragging a box (move) or one of its corners (resize).
+  function startDrag(e: React.MouseEvent, p: Plot, mode: "move" | "corner", corner: number) {
+    e.stopPropagation();
+    setMenu(null);
+    setEditId(p.id);
+    const orig = boxOf(p);
+    setDrag({ id: p.id, mode, corner, start: toProc(e), orig });
+    setDraftBox(orig);
+  }
+
   function onDown(e: React.MouseEvent) {
-    if (!addMode) return;
-    const p = toProc(e);
-    setDraw({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+    if (addMode) {
+      const p = toProc(e);
+      setDraw({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      return;
+    }
+    if (editMode) setEditId(null); // click empty area to deselect
   }
+
   function onMove(e: React.MouseEvent) {
-    if (!addMode || !draw) return;
-    const p = toProc(e);
-    setDraw((d) => (d ? { ...d, x1: p.x, y1: p.y } : d));
-  }
-  function onUp() {
-    if (!addMode || !draw) return;
-    const minx = Math.min(draw.x0, draw.x1);
-    const maxx = Math.max(draw.x0, draw.x1);
-    const miny = Math.min(draw.y0, draw.y1);
-    const maxy = Math.max(draw.y0, draw.y1);
-    setDraw(null);
-    if (maxx - minx > 4 && maxy - miny > 4 && onAddPlot) {
-      onAddPlot(rotatedRect(minx, miny, maxx, maxy, tilt));
+    if (addMode && draw) {
+      const p = toProc(e);
+      setDraw((d) => (d ? { ...d, x1: p.x, y1: p.y } : d));
+      return;
+    }
+    if (drag) {
+      const cur = toProc(e);
+      const dx = cur.x - drag.start.x;
+      const dy = cur.y - drag.start.y;
+      if (drag.mode === "move") {
+        setDraftBox(drag.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })));
+      } else {
+        setDraftBox(drag.orig.map((pt, i) => (i === drag.corner ? { x: pt.x + dx, y: pt.y + dy } : pt)));
+      }
     }
   }
 
+  function onUp() {
+    if (addMode && draw) {
+      const minx = Math.min(draw.x0, draw.x1);
+      const maxx = Math.max(draw.x0, draw.x1);
+      const miny = Math.min(draw.y0, draw.y1);
+      const maxy = Math.max(draw.y0, draw.y1);
+      setDraw(null);
+      if (maxx - minx > 4 && maxy - miny > 4 && onAddPlot) {
+        onAddPlot(rotatedRect(minx, miny, maxx, maxy, tilt));
+      }
+      return;
+    }
+    if (drag && draftBox) {
+      // Only persist when the box actually moved (a plain click just selects).
+      const changed = draftBox.some((pt, i) => pt.x !== drag.orig[i].x || pt.y !== drag.orig[i].y);
+      if (changed) onUpdateBox?.(drag.id, draftBox);
+    }
+    setDrag(null);
+    setDraftBox(null);
+  }
+
   const activeId = menu?.id ?? selectedId ?? null;
+  const editingPlot = editMode && editId != null ? plots.find((p) => p.id === editId) ?? null : null;
+  const editingBox = editingPlot ? (drag?.id === editingPlot.id && draftBox ? draftBox : boxOf(editingPlot)) : null;
 
   return (
     <div
@@ -162,12 +216,23 @@ export default function PlotMap({
         {plots.map((p) => {
           const c = STATUS[p.status].color;
           const isNone = p.status === "none";
-          const sel = p.id === activeId;
+          const isEditing = editMode && editId === p.id;
+          const sel = p.id === activeId || isEditing;
           const interactive = isAdmin || !!onSelect;
+          const box = isEditing && draftBox ? draftBox : boxOf(p);
+          const cursor = addMode
+            ? "crosshair"
+            : editMode
+            ? isEditing
+              ? "move"
+              : "pointer"
+            : interactive
+            ? "pointer"
+            : "default";
           return (
             <polygon
               key={p.id}
-              points={plotBox(p.polygon).map((pt) => `${pt.x},${pt.y}`).join(" ")}
+              points={box.map((pt) => `${pt.x},${pt.y}`).join(" ")}
               // "none" = cleared: dashed grey outline, no fill (but still clickable).
               fill={isNone ? "none" : c}
               fillOpacity={isNone ? 0 : sel ? 0.62 : 0.34}
@@ -175,14 +240,15 @@ export default function PlotMap({
               strokeWidth={sel ? 2.5 : 1.5}
               strokeDasharray={isNone ? "6 4" : undefined}
               strokeLinejoin="round"
-              style={{ cursor: addMode ? "crosshair" : interactive ? "pointer" : "default", pointerEvents: "all" }}
+              style={{ cursor, pointerEvents: "all" }}
+              onMouseDown={editMode ? (e) => startDrag(e, p, "move", -1) : undefined}
               onClick={(e) => {
                 if (addMode) return;
                 e.stopPropagation();
-                if (isAdmin) {
-                  const cx = p.centroid.x;
-                  const cy = p.centroid.y;
-                  setMenu({ id: p.id, xPct: (cx / procW) * 100, yPct: (cy / procH) * 100 });
+                if (editMode) {
+                  setEditId(p.id);
+                } else if (isAdmin) {
+                  setMenu({ id: p.id, xPct: (p.centroid.x / procW) * 100, yPct: (p.centroid.y / procH) * 100 });
                 } else if (onSelect) {
                   onSelect(p.id);
                 }
@@ -190,6 +256,25 @@ export default function PlotMap({
             />
           );
         })}
+
+        {/* Resize handles for the box being edited. */}
+        {editMode && editingPlot && editingBox && (
+          <g>
+            {editingBox.map((pt, i) => (
+              <circle
+                key={i}
+                cx={pt.x}
+                cy={pt.y}
+                r={handleR}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={handleR * 0.4}
+                style={{ cursor: "grab", pointerEvents: "all" }}
+                onMouseDown={(e) => startDrag(e, editingPlot, "corner", i)}
+              />
+            ))}
+          </g>
+        )}
 
         {draw && (
           <polygon
@@ -205,8 +290,8 @@ export default function PlotMap({
         )}
       </svg>
 
-      {/* status / delete popup for the clicked plot (admin) */}
-      {isAdmin && menu && (
+      {/* status / delete popup for the clicked plot (admin, non-edit mode) */}
+      {isAdmin && !editMode && menu && (
         <div
           className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-lg border border-neutral-200 bg-white p-1 shadow-lg"
           style={{ left: `${menu.xPct}%`, top: `${menu.yPct}%` }}

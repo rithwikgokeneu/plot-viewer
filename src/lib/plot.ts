@@ -26,6 +26,7 @@ export interface Plot {
   polygon: Pt[]; // detection (proc) coordinates
   centroid: Pt;
   status: Status;
+  box?: Pt[]; // user-adjusted box corners (proc coords); overrides the derived box
 }
 
 export interface Project {

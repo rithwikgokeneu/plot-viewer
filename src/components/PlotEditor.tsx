@@ -67,6 +67,7 @@ export default function PlotEditor() {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [tilt, setTilt] = useState(0);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const procRef = useRef({ w: 0, h: 0 });
@@ -194,11 +195,19 @@ export default function PlotEditor() {
       id: nextId, num: "", polygon,
       centroid: { x: cx / polygon.length, y: cy / polygon.length },
       status: "available" as Status,
+      box: polygon, // render a freshly drawn box exactly as drawn
     }]);
   }
 
   function setStatus(id: number, status: Status) {
     commit(plotsRef.current.map((p) => (p.id === id ? { ...p, status } : p)));
+  }
+
+  function updateBox(id: number, box: Pt[]) {
+    let cx = 0, cy = 0;
+    for (const pt of box) { cx += pt.x; cy += pt.y; }
+    const centroid = { x: cx / box.length, y: cy / box.length };
+    commit(plotsRef.current.map((p) => (p.id === id ? { ...p, box, centroid } : p)));
   }
 
   function removePlot(id: number) {
@@ -222,10 +231,16 @@ export default function PlotEditor() {
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setAddMode((v) => !v)}
+            onClick={() => { setAddMode((v) => !v); setEditMode(false); }}
             className={`rounded px-3 py-2 text-sm font-medium ${addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"}`}
           >
             {addMode ? "Done adding" : "+ Add plot box"}
+          </button>
+          <button
+            onClick={() => { setEditMode((v) => !v); setAddMode(false); }}
+            className={`rounded px-3 py-2 text-sm font-medium ${editMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"}`}
+          >
+            {editMode ? "Done editing" : "✎ Edit boxes"}
           </button>
           <button
             onClick={undo}
@@ -259,11 +274,15 @@ export default function PlotEditor() {
           addMode={addMode}
           onAddPlot={addPlot}
           tilt={(tilt * Math.PI) / 180}
+          editMode={editMode}
+          onUpdateBox={updateBox}
         />
 
         <p className="text-xs text-neutral-500">
           {addMode
             ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
+            : editMode
+            ? "Edit mode: click a box to select it, then drag a corner to resize or drag the middle to move. Changes save instantly — use Undo to revert."
             : "Click a plot to set its status (colour) or delete it. Changes save to the live database instantly — use Undo to revert."}
         </p>
       </div>
