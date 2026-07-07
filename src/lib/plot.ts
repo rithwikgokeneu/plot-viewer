@@ -1,15 +1,18 @@
 import { get, set, del } from "idb-keyval";
 import type { Pt } from "./detect";
 
-export type Status = "available" | "reserved" | "booked" | "sold";
+export type Status = "none" | "available" | "reserved" | "booked" | "sold";
 
 export const STATUS: Record<Status, { label: string; color: string }> = {
+  none: { label: "Unmarked", color: "#9ca3af" },
   available: { label: "Available", color: "#16a34a" },
   reserved: { label: "Reserved", color: "#eab308" },
   booked: { label: "Booked", color: "#f97316" },
   sold: { label: "Sold", color: "#dc2626" },
 };
 
+// The four coloured statuses shown as swatches + count rows. "none" is the
+// "cleared" state (box kept, colour removed) — offered via a separate button.
 export const STATUS_ORDER: Status[] = [
   "available",
   "reserved",
@@ -65,8 +68,7 @@ export async function clearProject(): Promise<void> {
 }
 
 export function countByStatus(plots: Plot[]): Record<Status, number> {
-  return STATUS_ORDER.reduce(
-    (acc, s) => ({ ...acc, [s]: plots.filter((p) => p.status === s).length }),
-    {} as Record<Status, number>
-  );
+  const counts: Record<Status, number> = { none: 0, available: 0, reserved: 0, booked: 0, sold: 0 };
+  for (const p of plots) counts[p.status] = (counts[p.status] ?? 0) + 1;
+  return counts;
 }

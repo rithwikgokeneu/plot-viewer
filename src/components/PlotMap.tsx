@@ -161,18 +161,21 @@ export default function PlotMap({
       >
         {plots.map((p) => {
           const c = STATUS[p.status].color;
+          const isNone = p.status === "none";
           const sel = p.id === activeId;
           const interactive = isAdmin || !!onSelect;
           return (
             <polygon
               key={p.id}
               points={plotBox(p.polygon).map((pt) => `${pt.x},${pt.y}`).join(" ")}
-              fill={c}
-              fillOpacity={sel ? 0.62 : 0.34}
+              // "none" = cleared: dashed grey outline, no fill (but still clickable).
+              fill={isNone ? "none" : c}
+              fillOpacity={isNone ? 0 : sel ? 0.62 : 0.34}
               stroke={c}
               strokeWidth={sel ? 2.5 : 1.5}
+              strokeDasharray={isNone ? "6 4" : undefined}
               strokeLinejoin="round"
-              style={{ cursor: addMode ? "crosshair" : interactive ? "pointer" : "default" }}
+              style={{ cursor: addMode ? "crosshair" : interactive ? "pointer" : "default", pointerEvents: "all" }}
               onClick={(e) => {
                 if (addMode) return;
                 e.stopPropagation();
@@ -220,6 +223,16 @@ export default function PlotMap({
               style={{ backgroundColor: STATUS[s].color }}
             />
           ))}
+          <button
+            title="Remove colour (keep the box)"
+            onClick={() => {
+              onSetStatus?.(menu.id, "none");
+              setMenu(null);
+            }}
+            className="flex h-6 items-center rounded bg-neutral-100 px-2 text-xs font-medium text-neutral-600 hover:bg-neutral-200"
+          >
+            Clear
+          </button>
           <span className="mx-0.5 h-6 w-px bg-neutral-200" />
           <button
             title="Delete this box"
