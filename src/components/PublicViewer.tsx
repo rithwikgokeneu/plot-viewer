@@ -96,8 +96,9 @@ export default function PublicViewer() {
   }
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-      <div className="min-w-0 flex-1">
+    <div className="flex flex-col gap-4">
+      {/* Map gets the full width, sized to fit the viewport height. */}
+      <div className="w-full">
         {imgUrl && (
           <PlotMap
             imgUrl={imgUrl}
@@ -110,15 +111,16 @@ export default function PublicViewer() {
         )}
       </div>
 
-      <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
-        <div className="rounded-lg border border-neutral-200 p-4">
+      {/* Availability + selected, below the map (side by side on wider screens). */}
+      <div className="flex flex-col gap-4 text-sm sm:flex-row sm:items-start">
+        <div className="flex-1 rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="font-semibold">Availability</h2>
             <span className="text-3xl font-bold">{plots.length}</span>
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 sm:flex-col sm:flex-nowrap">
             {STATUS_ORDER.map((s) => (
-              <div key={s} className="flex items-center gap-2">
+              <div key={s} className="flex min-w-24 items-center gap-2">
                 <span
                   className="inline-block h-3.5 w-3.5 rounded-sm"
                   style={{ backgroundColor: STATUS[s].color }}
@@ -130,7 +132,7 @@ export default function PublicViewer() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-neutral-200 p-4">
+        <div className="flex-1 rounded-lg border border-neutral-200 p-4">
           <h3 className="mb-2 font-semibold">Selected plot</h3>
           {selected ? (
             <span
