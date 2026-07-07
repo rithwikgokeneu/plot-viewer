@@ -37,6 +37,55 @@ function rotatedRect(x0: number, y0: number, x1: number, y1: number, ang: number
   ].map(([dx, dy]) => ({ x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos }));
 }
 
+// Min-area bounding rectangle (4 corners) of a polygon — a clean tilted box
+// that fully encloses the detected shape, so the overlay covers all four sides.
+function minAreaRect(poly: Pt[]): Pt[] {
+  if (poly.length < 3) return poly;
+  let best: { minx: number; maxx: number; miny: number; maxy: number; ang: number } | null = null;
+  let bestArea = Infinity;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % n];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const cos = Math.cos(-ang);
+    const sin = Math.sin(-ang);
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+    for (const p of poly) {
+      const rx = p.x * cos - p.y * sin;
+      const ry = p.x * sin + p.y * cos;
+      if (rx < minx) minx = rx;
+      if (rx > maxx) maxx = rx;
+      if (ry < miny) miny = ry;
+      if (ry > maxy) maxy = ry;
+    }
+    const area = (maxx - minx) * (maxy - miny);
+    if (area < bestArea) {
+      bestArea = area;
+      best = { minx, maxx, miny, maxy, ang };
+    }
+  }
+  if (!best) return poly;
+  const { minx, maxx, miny, maxy, ang } = best;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return ([[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy]] as [number, number][]).map(
+    ([x, y]) => ({ x: x * c - y * s, y: x * s + y * c })
+  );
+}
+
+// Expand corners outward from their center by `factor` (to reach the plot's outer border).
+function expand(corners: Pt[], factor: number): Pt[] {
+  const cx = corners.reduce((s, p) => s + p.x, 0) / corners.length;
+  const cy = corners.reduce((s, p) => s + p.y, 0) / corners.length;
+  return corners.map((p) => ({ x: cx + (p.x - cx) * factor, y: cy + (p.y - cy) * factor }));
+}
+
+// The rendered box for a plot: its min-area rectangle, expanded to cover the cell.
+function plotBox(poly: Pt[]): Pt[] {
+  return expand(minAreaRect(poly), 1.12);
+}
+
 export default function PlotMap({
   imgUrl,
   procW,
@@ -117,15 +166,7 @@ export default function PlotMap({
           return (
             <polygon
               key={p.id}
-              points={p.polygon
-                .map((pt) => {
-                  // Expand ~6% around the centroid so the box covers the whole
-                  // plot cell (detection hull sits slightly inside the borders).
-                  const ex = p.centroid.x + (pt.x - p.centroid.x) * 1.06;
-                  const ey = p.centroid.y + (pt.y - p.centroid.y) * 1.06;
-                  return `${ex},${ey}`;
-                })
-                .join(" ")}
+              points={plotBox(p.polygon).map((pt) => `${pt.x},${pt.y}`).join(" ")}
               fill={c}
               fillOpacity={sel ? 0.62 : 0.34}
               stroke={c}
