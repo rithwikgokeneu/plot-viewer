@@ -14,11 +14,9 @@ import {
   type Status,
 } from "@/lib/plot";
 
-// Bundled map (static asset) + shared live DB for the plot data.
 const BUNDLED_MAP = "/plotmap.png";
 const ADMIN_PW = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin";
 
-// Orientation (radians) of a convex polygon's minimum-area bounding rectangle.
 function minAreaRectAngle(poly: Pt[]): number {
   let bestArea = Infinity;
   let bestAng = 0;
@@ -63,8 +61,6 @@ export default function PlotEditor() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [proc, setProc] = useState({ w: 0, h: 0 });
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [threshold, setThreshold] = useState<number>(-1);
-  const [invert, setInvert] = useState(false);
   const [busy, setBusy] = useState<string | null>("Loading map…");
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -74,7 +70,7 @@ export default function PlotEditor() {
   const procRef = useRef({ w: 0, h: 0 });
 
   const runDetect = useCallback(
-    (image: HTMLImageElement, pw: number, ph: number, t: number, inv: boolean): Plot[] => {
+    (image: HTMLImageElement, pw: number, ph: number): Plot[] => {
       const canvas = document.createElement("canvas");
       canvas.width = pw;
       canvas.height = ph;
@@ -84,7 +80,7 @@ export default function PlotEditor() {
       const data = ctx.getImageData(0, 0, pw, ph);
       const found = detectPlots(
         { data: data.data, width: pw, height: ph },
-        { threshold: t < 0 ? undefined : t, invert: inv, minAreaFrac: 0.0003, maxAreaFrac: 0.12 }
+        { minAreaFrac: 0.0003, maxAreaFrac: 0.12 }
       );
       return found.map((p, i) => ({
         id: i + 1,
@@ -97,7 +93,6 @@ export default function PlotEditor() {
     []
   );
 
-  // Persist the full plots array to the shared DB.
   const persist = useCallback(async (nextPlots: Plot[]) => {
     try {
       await savePlotsRemote(nextPlots, procRef.current.w, procRef.current.h, ADMIN_PW);
@@ -107,8 +102,6 @@ export default function PlotEditor() {
     }
   }, []);
 
-  // On mount: load the bundled map, then load shared plots from the DB
-  // (or auto-detect + seed on first run).
   useEffect(() => {
     let url: string | null = null;
     (async () => {
@@ -132,7 +125,7 @@ export default function PlotEditor() {
               setBusy(null);
             } else {
               setBusy("Detecting plots…");
-              const next = runDetect(image, pr.w, pr.h, threshold, invert);
+              const next = runDetect(image, pr.w, pr.h);
               setPlots(next);
               setTilt(estimateTilt(next));
               await seedPlotsRemote(next, pr.w, pr.h);
@@ -159,24 +152,6 @@ export default function PlotEditor() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function redetect() {
-    if (!imgRef.current) return;
-    setError(null);
-    setBusy("Detecting plots…");
-    setTimeout(async () => {
-      try {
-        const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
-        setPlots(next);
-        setTilt(estimateTilt(next));
-        await persist(next);
-      } catch {
-        setError("Re-detect failed — please try again.");
-      } finally {
-        setBusy(null);
-      }
-    }, 0);
-  }
 
   function addPlot(polygon: Pt[]) {
     let cx = 0, cy = 0;
@@ -260,15 +235,15 @@ export default function PlotEditor() {
         <p className="text-xs text-neutral-500">
           {addMode
             ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
-            : "Click a plot to set its status or delete it. Changes save to the live database instantly."}
+            : "Click a plot to set its status (colour) or delete it. Changes save to the live database instantly."}
         </p>
       </div>
 
       <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
         <div className="rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="font-semibold">Plots</h2>
-            <span className="text-3xl font-bold">{plots.length}</span>
+            <h2 className="font-semibold">Available</h2>
+            <span className="text-3xl font-bold text-green-700">{counts.available}</span>
           </div>
           <div className="flex flex-col gap-2">
             {STATUS_ORDER.map((s) => (
@@ -278,25 +253,12 @@ export default function PlotEditor() {
                 <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
               </div>
             ))}
+            <div className="mt-1 flex items-center gap-2 border-t border-neutral-100 pt-2 text-neutral-500">
+              <span>Total plots</span>
+              <span className="ml-auto font-semibold tabular-nums">{plots.length}</span>
+            </div>
           </div>
         </div>
-
-        <details className="rounded-lg border border-neutral-200 p-3">
-          <summary className="cursor-pointer font-semibold">Detection settings</summary>
-          <div className="mt-3 flex flex-col gap-3">
-            <label className="flex items-center justify-between gap-2">
-              <span className="text-neutral-600">Sensitivity {threshold < 0 ? "(auto)" : threshold}</span>
-              <input type="range" min={-1} max={255} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
-              <span className="text-neutral-600">Invert (plots darker than background)</span>
-            </label>
-            <button onClick={redetect} disabled={!!busy} className="rounded bg-neutral-800 px-3 py-2 text-white disabled:opacity-40">
-              {busy ?? "Re-detect (overwrites live data)"}
-            </button>
-          </div>
-        </details>
       </div>
     </div>
   );

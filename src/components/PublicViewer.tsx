@@ -130,8 +130,8 @@ export default function PublicViewer() {
       <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
         <div className="rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="font-semibold">Availability</h2>
-            <span className="text-3xl font-bold">{plots.length}</span>
+            <h2 className="font-semibold">Available</h2>
+            <span className="text-3xl font-bold text-green-700">{counts.available}</span>
           </div>
           <div className="flex flex-col gap-2">
             {STATUS_ORDER.map((s) => (
@@ -144,6 +144,10 @@ export default function PublicViewer() {
                 <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
               </div>
             ))}
+            <div className="mt-1 flex items-center gap-2 border-t border-neutral-100 pt-2 text-neutral-500">
+              <span>Total plots</span>
+              <span className="ml-auto font-semibold tabular-nums">{plots.length}</span>
+            </div>
           </div>
         </div>
 
