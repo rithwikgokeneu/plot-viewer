@@ -23,7 +23,6 @@ export default async function EditorPage({ params }: { params: Promise<{ id: str
       <PlotEditor
         projectId={project.id}
         initialImageUrl={project.imageUrl}
-        initialDziUrl={project.dziUrl}
         initialNat={{ w: project.natW, h: project.natH }}
         initialPlots={project.plots}
       />

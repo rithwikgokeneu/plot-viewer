@@ -1,37 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import dynamic from "next/dynamic";
+import PlotMap from "@/components/PlotMap";
+import { denormPolygon } from "@/lib/coords";
 import { STATUS, STATUS_ORDER, countByStatus, type Plot } from "@/lib/plot";
-
-// SSR-safe: OpenSeadragon (via DeepZoomMap) touches `document` at module load,
-// which would 500 this server-rendered page. Load client-side only — mirrors
-// the fix already applied to PlotEditor.tsx for the same reason.
-const DeepZoomMap = dynamic(() => import("@/components/DeepZoomMap"), { ssr: false });
 
 interface Props {
   name: string;
-  dziUrl: string;
+  imageUrl: string;
   natW: number;
   natH: number;
-  plots: Plot[]; // normalized
+  plots: Plot[]; // normalized 0..1
 }
 
 // `name` is part of the contract (the page passes project.name) but the
-// page itself renders the <h1>; PublicViewer doesn't need to repeat it.
-export default function PublicViewer({ dziUrl, natW, natH, plots }: Props) {
+// page itself renders the <h1>; PublicViewer doesn't repeat it.
+export default function PublicViewer({ imageUrl, natW, natH, plots }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const counts = countByStatus(plots);
   const selected = plots.find((p) => p.id === selectedId) || null;
 
+  // Plots are stored normalized 0..1; PlotMap works in image-pixel coords.
+  const displayPlots = plots.map((p) => ({
+    ...p,
+    polygon: denormPolygon(p.polygon, natW, natH),
+    centroid: denormPolygon([p.centroid], natW, natH)[0],
+  }));
+
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-1">
-        <DeepZoomMap
-          dziUrl={dziUrl}
-          natW={natW}
-          natH={natH}
-          plots={plots}
+        <PlotMap
+          imgUrl={imageUrl}
+          procW={natW}
+          procH={natH}
+          plots={displayPlots}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />

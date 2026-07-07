@@ -4,7 +4,7 @@ import { listProjects } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const published = (await listProjects()).filter((p) => p.status === "published" && p.dziUrl);
+  const published = (await listProjects()).filter((p) => p.status === "published" && p.imageUrl);
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
       <header className="mb-6 flex items-center justify-between gap-4">
