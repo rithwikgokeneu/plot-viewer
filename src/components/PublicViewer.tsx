@@ -146,15 +146,11 @@ export default function PublicViewer() {
             ))}
             {counts.none > 0 && (
               <div className="flex items-center gap-2">
-                <span className="inline-block h-3.5 w-3.5 rounded-sm border border-dashed border-neutral-400" />
+                <span className="inline-block h-3.5 w-3.5 rounded-sm border border-dashed border-neutral-400 bg-neutral-400/40" />
                 <span className="text-neutral-600">Unmarked</span>
                 <span className="ml-auto font-semibold tabular-nums">{counts.none}</span>
               </div>
             )}
-            <div className="mt-1 flex items-center gap-2 border-t border-neutral-100 pt-2 text-neutral-500">
-              <span>Total plots</span>
-              <span className="ml-auto font-semibold tabular-nums">{plots.length}</span>
-            </div>
           </div>
         </div>
 

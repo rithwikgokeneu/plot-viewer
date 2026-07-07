@@ -233,9 +233,9 @@ export default function PlotMap({
             <polygon
               key={p.id}
               points={box.map((pt) => `${pt.x},${pt.y}`).join(" ")}
-              // "none" = cleared: dashed grey outline, no fill (but still clickable).
-              fill={isNone ? "none" : c}
-              fillOpacity={isNone ? 0 : sel ? 0.62 : 0.34}
+              // "none" = cleared: visible neutral grey box (colour removed, box kept), dashed edge.
+              fill={c}
+              fillOpacity={sel ? 0.62 : isNone ? 0.4 : 0.34}
               stroke={c}
               strokeWidth={sel ? 2.5 : 1.5}
               strokeDasharray={isNone ? "6 4" : undefined}
