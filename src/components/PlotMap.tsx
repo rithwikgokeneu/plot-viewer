@@ -117,12 +117,20 @@ export default function PlotMap({
           return (
             <polygon
               key={p.id}
-              points={p.polygon.map((pt) => `${pt.x},${pt.y}`).join(" ")}
+              points={p.polygon
+                .map((pt) => {
+                  // Expand ~6% around the centroid so the box covers the whole
+                  // plot cell (detection hull sits slightly inside the borders).
+                  const ex = p.centroid.x + (pt.x - p.centroid.x) * 1.06;
+                  const ey = p.centroid.y + (pt.y - p.centroid.y) * 1.06;
+                  return `${ex},${ey}`;
+                })
+                .join(" ")}
               fill={c}
-              fillOpacity={sel ? 0.5 : 0.22}
+              fillOpacity={sel ? 0.62 : 0.34}
               stroke={c}
-              strokeWidth={sel ? 3 : 1.5}
-              vectorEffect="non-scaling-stroke"
+              strokeWidth={sel ? 2.5 : 1.5}
+              strokeLinejoin="round"
               style={{ cursor: addMode ? "crosshair" : interactive ? "pointer" : "default" }}
               onClick={(e) => {
                 if (addMode) return;
