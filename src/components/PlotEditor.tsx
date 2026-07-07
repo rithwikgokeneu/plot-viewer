@@ -3,22 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { detectPlots, type Pt } from "@/lib/detect";
 import PlotMap from "@/components/PlotMap";
+import { fetchPlots, savePlotsRemote, seedPlotsRemote } from "@/lib/api";
 import {
   PROC_MAX,
   STATUS,
   STATUS_ORDER,
   countByStatus,
   fit,
-  loadProject,
-  saveProject,
   type Plot,
   type Status,
 } from "@/lib/plot";
 
-// The plot map is bundled with the app (public/plotmap.png) and pre-loaded on
-// open — no upload step. Plots are auto-detected; edits (status / add / delete)
-// persist to IndexedDB and survive reloads.
+// Bundled map (static asset) + shared live DB for the plot data.
 const BUNDLED_MAP = "/plotmap.png";
+const ADMIN_PW = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin";
 
 // Orientation (radians) of a convex polygon's minimum-area bounding rectangle.
 function minAreaRectAngle(poly: Pt[]): number {
@@ -31,10 +29,7 @@ function minAreaRectAngle(poly: Pt[]): number {
     const ang = Math.atan2(b.y - a.y, b.x - a.x);
     const cos = Math.cos(-ang);
     const sin = Math.sin(-ang);
-    let minx = Infinity;
-    let maxx = -Infinity;
-    let miny = Infinity;
-    let maxy = -Infinity;
+    let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
     for (const p of poly) {
       const rx = p.x * cos - p.y * sin;
       const ry = p.x * sin + p.y * cos;
@@ -52,7 +47,6 @@ function minAreaRectAngle(poly: Pt[]): number {
   return bestAng;
 }
 
-// Median min-area-rectangle angle (degrees, in (-45,45]) over detected plots.
 function estimateTilt(plots: Plot[]): number {
   const angles: number[] = [];
   for (const p of plots) {
@@ -67,26 +61,25 @@ function estimateTilt(plots: Plot[]): number {
 
 export default function PlotEditor() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
-  const [nat, setNat] = useState({ w: 0, h: 0 });
   const [proc, setProc] = useState({ w: 0, h: 0 });
   const [plots, setPlots] = useState<Plot[]>([]);
-  const [threshold, setThreshold] = useState<number>(-1); // -1 = auto (Otsu)
+  const [threshold, setThreshold] = useState<number>(-1);
   const [invert, setInvert] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>("Loading map…");
+  const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [tilt, setTilt] = useState(0);
-
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const procRef = useRef({ w: 0, h: 0 });
 
   const runDetect = useCallback(
-    (image: HTMLImageElement, pw: number, ph: number, t: number, inv: boolean) => {
+    (image: HTMLImageElement, pw: number, ph: number, t: number, inv: boolean): Plot[] => {
       const canvas = document.createElement("canvas");
       canvas.width = pw;
       canvas.height = ph;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return [] as Plot[];
+      if (!ctx) return [];
       ctx.drawImage(image, 0, 0, pw, ph);
       const data = ctx.getImageData(0, 0, pw, ph);
       const found = detectPlots(
@@ -104,73 +97,61 @@ export default function PlotEditor() {
     []
   );
 
-  // Load an image blob → detect plots → render + persist.
-  function loadAndDetect(blob: Blob) {
-    const url = URL.createObjectURL(blob);
-    const image = new window.Image();
-    image.onload = () => {
-      const pr = fit(image.width, image.height, PROC_MAX, PROC_MAX);
-      imgRef.current = image;
-      setImageBlob(blob);
-      setImgUrl(url);
-      setNat({ w: image.width, h: image.height });
-      setProc({ w: pr.w, h: pr.h });
-      setAddMode(false);
-      setBusy("Detecting plots…");
-      setTimeout(async () => {
-        const next = runDetect(image, pr.w, pr.h, threshold, invert);
-        setPlots(next);
-        setTilt(estimateTilt(next));
-        await saveProject({
-          image: blob,
-          natW: image.width,
-          natH: image.height,
-          procW: pr.w,
-          procH: pr.h,
-          plots: next,
-          updatedAt: Date.now(),
-        });
-        setSavedAt(Date.now());
-        setBusy(null);
-      }, 0);
-    };
-    image.onerror = () => setBusy("Could not load the map image.");
-    image.src = url;
-  }
-
-  // Fetch the bundled map and detect (used on first open + Reset).
-  async function loadBundledMap() {
-    setBusy("Loading map…");
+  // Persist the full plots array to the shared DB.
+  const persist = useCallback(async (nextPlots: Plot[]) => {
     try {
-      const res = await fetch(BUNDLED_MAP);
-      if (!res.ok) throw new Error("fetch failed");
-      loadAndDetect(await res.blob());
+      await savePlotsRemote(nextPlots, procRef.current.w, procRef.current.h, ADMIN_PW);
+      setSavedAt(Date.now());
     } catch {
-      setBusy("Could not load the map. Refresh to retry.");
+      setError("Couldn't save to the server — check your connection and retry.");
     }
-  }
+  }, []);
 
-  // On mount: restore saved edits if present, else pre-load the bundled map.
+  // On mount: load the bundled map, then load shared plots from the DB
+  // (or auto-detect + seed on first run).
   useEffect(() => {
     let url: string | null = null;
     (async () => {
-      const p = await loadProject();
-      if (p) {
-        url = URL.createObjectURL(p.image);
+      try {
+        const res = await fetch(BUNDLED_MAP);
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
         const image = new window.Image();
-        image.onload = () => {
+        image.onload = async () => {
+          const pr = fit(image.width, image.height, PROC_MAX, PROC_MAX);
           imgRef.current = image;
+          procRef.current = { w: pr.w, h: pr.h };
+          setImgUrl(url);
+          setProc({ w: pr.w, h: pr.h });
+          try {
+            const state = await fetchPlots();
+            if (state.plots.length > 0) {
+              setPlots(state.plots);
+              setTilt(estimateTilt(state.plots));
+              setSavedAt(state.updatedAt);
+              setBusy(null);
+            } else {
+              setBusy("Detecting plots…");
+              const next = runDetect(image, pr.w, pr.h, threshold, invert);
+              setPlots(next);
+              setTilt(estimateTilt(next));
+              await seedPlotsRemote(next, pr.w, pr.h);
+              setSavedAt(Date.now());
+              setBusy(null);
+            }
+          } catch {
+            setBusy(null);
+            setError("Couldn't reach the server.");
+          }
+        };
+        image.onerror = () => {
+          setBusy(null);
+          setError("Could not load the map image.");
         };
         image.src = url;
-        setImageBlob(p.image);
-        setImgUrl(url);
-        setNat({ w: p.natW, h: p.natH });
-        setProc({ w: p.procW, h: p.procH });
-        setPlots(p.plots);
-        setTilt(estimateTilt(p.plots));
-        setSavedAt(p.updatedAt);
-      } else {
-        loadBundledMap();
+      } catch {
+        setBusy(null);
+        setError("Could not load the map.");
       }
     })();
     return () => {
@@ -179,54 +160,34 @@ export default function PlotEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const persist = useCallback(
-    async (nextPlots: Plot[]) => {
-      if (!imageBlob) return;
-      await saveProject({
-        image: imageBlob,
-        natW: nat.w,
-        natH: nat.h,
-        procW: proc.w,
-        procH: proc.h,
-        plots: nextPlots,
-        updatedAt: Date.now(),
-      });
-      setSavedAt(Date.now());
-    },
-    [imageBlob, nat, proc]
-  );
-
   function redetect() {
     if (!imgRef.current) return;
+    setError(null);
     setBusy("Detecting plots…");
     setTimeout(async () => {
-      const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
-      setPlots(next);
-      setTilt(estimateTilt(next));
-      await persist(next);
-      setBusy(null);
+      try {
+        const next = runDetect(imgRef.current!, proc.w, proc.h, threshold, invert);
+        setPlots(next);
+        setTilt(estimateTilt(next));
+        await persist(next);
+      } catch {
+        setError("Re-detect failed — please try again.");
+      } finally {
+        setBusy(null);
+      }
     }, 0);
   }
 
   function addPlot(polygon: Pt[]) {
-    let cx = 0;
-    let cy = 0;
-    for (const pt of polygon) {
-      cx += pt.x;
-      cy += pt.y;
-    }
+    let cx = 0, cy = 0;
+    for (const pt of polygon) { cx += pt.x; cy += pt.y; }
     setPlots((prev) => {
       const nextId = prev.reduce((m, p) => Math.max(m, p.id), 0) + 1;
-      const next = [
-        ...prev,
-        {
-          id: nextId,
-          num: "",
-          polygon,
-          centroid: { x: cx / polygon.length, y: cy / polygon.length },
-          status: "available" as Status,
-        },
-      ];
+      const next = [...prev, {
+        id: nextId, num: "", polygon,
+        centroid: { x: cx / polygon.length, y: cy / polygon.length },
+        status: "available" as Status,
+      }];
       void persist(next);
       return next;
     });
@@ -248,56 +209,39 @@ export default function PlotEditor() {
     });
   }
 
-  // Discard edits and re-detect fresh from the bundled map.
-  function resetToMap() {
-    setPlots([]);
-    setSavedAt(null);
-    void loadBundledMap();
-  }
-
   const counts = countByStatus(plots);
 
-  // Bundled map is loading/detecting.
   if (!imgUrl) {
     return (
       <div className="mx-auto flex max-w-xl flex-col items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-12 text-center">
-        <span className="text-lg font-medium text-neutral-700">{busy ?? "Loading map…"}</span>
-        <span className="text-sm text-neutral-500">Plots are detected automatically.</span>
+        <span className={`text-lg font-medium ${error ? "text-red-600" : "text-neutral-700"}`}>
+          {error ?? busy ?? "Loading map…"}
+        </span>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-      {/* Map + toolbar */}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setAddMode((v) => !v)}
-            className={`rounded px-3 py-2 text-sm font-medium ${
-              addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"
-            }`}
+            className={`rounded px-3 py-2 text-sm font-medium ${addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"}`}
           >
             {addMode ? "Done adding" : "+ Add plot box"}
           </button>
-
           {addMode && (
             <label className="flex items-center gap-2 rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-600">
               Tilt
-              <input
-                type="range"
-                min={-45}
-                max={45}
-                value={tilt}
-                onChange={(e) => setTilt(Number(e.target.value))}
-              />
+              <input type="range" min={-45} max={45} value={tilt} onChange={(e) => setTilt(Number(e.target.value))} />
               <span className="w-8 tabular-nums">{tilt}°</span>
             </label>
           )}
-
           <span className="ml-auto flex items-center gap-3 text-xs text-neutral-500">
             {busy && <span className="text-blue-700">{busy}</span>}
-            {!busy && savedAt && <span className="text-green-700">Saved ✓</span>}
+            {!busy && error && <span className="text-red-600">{error}</span>}
+            {!busy && !error && savedAt && <span className="text-green-700">Saved ✓ (live)</span>}
           </span>
         </div>
 
@@ -316,11 +260,10 @@ export default function PlotEditor() {
         <p className="text-xs text-neutral-500">
           {addMode
             ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
-            : "Click a plot to set its status or delete it. Use “+ Add plot box” to draw a missed one. Changes save automatically."}
+            : "Click a plot to set its status or delete it. Changes save to the live database instantly."}
         </p>
       </div>
 
-      {/* Side panel */}
       <div className="flex w-full shrink-0 flex-col gap-4 text-sm lg:w-72">
         <div className="rounded-lg border border-neutral-200 p-4">
           <div className="mb-3 flex items-baseline justify-between">
@@ -330,10 +273,7 @@ export default function PlotEditor() {
           <div className="flex flex-col gap-2">
             {STATUS_ORDER.map((s) => (
               <div key={s} className="flex items-center gap-2">
-                <span
-                  className="inline-block h-3.5 w-3.5 rounded-sm"
-                  style={{ backgroundColor: STATUS[s].color }}
-                />
+                <span className="inline-block h-3.5 w-3.5 rounded-sm" style={{ backgroundColor: STATUS[s].color }} />
                 <span className="text-neutral-600">{STATUS[s].label}</span>
                 <span className="ml-auto font-semibold tabular-nums">{counts[s]}</span>
               </div>
@@ -345,41 +285,16 @@ export default function PlotEditor() {
           <summary className="cursor-pointer font-semibold">Detection settings</summary>
           <div className="mt-3 flex flex-col gap-3">
             <label className="flex items-center justify-between gap-2">
-              <span className="text-neutral-600">
-                Sensitivity {threshold < 0 ? "(auto)" : threshold}
-              </span>
-              <input
-                type="range"
-                min={-1}
-                max={255}
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-              />
+              <span className="text-neutral-600">Sensitivity {threshold < 0 ? "(auto)" : threshold}</span>
+              <input type="range" min={-1} max={255} value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
             </label>
             <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={invert}
-                onChange={(e) => setInvert(e.target.checked)}
-              />
+              <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
               <span className="text-neutral-600">Invert (plots darker than background)</span>
             </label>
-            <div className="flex gap-2">
-              <button
-                onClick={redetect}
-                disabled={!!busy}
-                className="flex-1 rounded bg-neutral-800 px-3 py-2 text-white disabled:opacity-40"
-              >
-                {busy ?? "Re-detect"}
-              </button>
-              <button
-                onClick={resetToMap}
-                disabled={!!busy}
-                className="rounded border border-neutral-300 px-3 py-2 text-neutral-700 disabled:opacity-40"
-              >
-                Reset
-              </button>
-            </div>
+            <button onClick={redetect} disabled={!!busy} className="rounded bg-neutral-800 px-3 py-2 text-white disabled:opacity-40">
+              {busy ?? "Re-detect (overwrites live data)"}
+            </button>
           </div>
         </details>
       </div>

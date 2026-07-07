@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@vercel/postgres": "^0.10.0",
     "dxf-parser": "^1.1.2",
     "heic2any": "^0.0.4",
     "idb-keyval": "^6.2.6",

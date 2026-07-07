@@ -1,23 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PlotMap from "@/components/PlotMap";
 import { detectPlots } from "@/lib/detect";
+import { fetchPlots, seedPlotsRemote } from "@/lib/api";
 import {
   PROC_MAX,
   STATUS,
   STATUS_ORDER,
   countByStatus,
   fit,
-  loadProject,
   type Plot,
   type Status,
 } from "@/lib/plot";
 
-// Bundled map — same asset the editor pre-loads. Public falls back to it (and
-// auto-detects, read-only) when this browser has no admin-saved project yet,
-// so the public view always shows the map instead of an empty state.
 const BUNDLED_MAP = "/plotmap.png";
+const POLL_MS = 4000;
 
 export default function PublicViewer() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
@@ -25,53 +23,67 @@ export default function PublicViewer() {
   const [plots, setPlots] = useState<Plot[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const cancelled = useRef(false);
 
   useEffect(() => {
+    cancelled.current = false;
     let url: string | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    function detectOn(image: HTMLImageElement, pw: number, ph: number): Plot[] {
+      const canvas = document.createElement("canvas");
+      canvas.width = pw;
+      canvas.height = ph;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return [];
+      ctx.drawImage(image, 0, 0, pw, ph);
+      const data = ctx.getImageData(0, 0, pw, ph);
+      const found = detectPlots(
+        { data: data.data, width: pw, height: ph },
+        { minAreaFrac: 0.0003, maxAreaFrac: 0.12 }
+      );
+      return found.map((f, i) => ({
+        id: i + 1,
+        num: String(i + 1),
+        polygon: f.polygon,
+        centroid: f.centroid,
+        status: "available" as Status,
+      }));
+    }
+
     (async () => {
-      // 1) Prefer the admin-saved project (includes status edits).
-      const p = await loadProject();
-      if (p) {
-        url = URL.createObjectURL(p.image);
-        setImgUrl(url);
-        setProc({ w: p.procW, h: p.procH });
-        setPlots(p.plots);
-        setLoaded(true);
-        return;
-      }
-      // 2) Fallback: load the bundled map and auto-detect (read-only display).
       try {
         const res = await fetch(BUNDLED_MAP);
-        if (!res.ok) throw new Error("fetch failed");
         const blob = await res.blob();
         url = URL.createObjectURL(blob);
         const image = new window.Image();
-        image.onload = () => {
+        image.onload = async () => {
           const pr = fit(image.width, image.height, PROC_MAX, PROC_MAX);
-          const canvas = document.createElement("canvas");
-          canvas.width = pr.w;
-          canvas.height = pr.h;
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            ctx.drawImage(image, 0, 0, pr.w, pr.h);
-            const data = ctx.getImageData(0, 0, pr.w, pr.h);
-            const found = detectPlots(
-              { data: data.data, width: pr.w, height: pr.h },
-              { minAreaFrac: 0.0003, maxAreaFrac: 0.12 }
-            );
-            setPlots(
-              found.map((f, i) => ({
-                id: i + 1,
-                num: String(i + 1),
-                polygon: f.polygon,
-                centroid: f.centroid,
-                status: "available" as Status,
-              }))
-            );
-          }
+          if (cancelled.current) return;
           setProc({ w: pr.w, h: pr.h });
           setImgUrl(url);
-          setLoaded(true);
+          try {
+            const state = await fetchPlots();
+            if (state.plots.length > 0) {
+              if (!cancelled.current) setPlots(state.plots);
+            } else {
+              const seeded = detectOn(image, pr.w, pr.h);
+              if (!cancelled.current) setPlots(seeded);
+              await seedPlotsRemote(seeded, pr.w, pr.h);
+            }
+          } catch {
+            /* keep showing the map even if the DB read fails */
+          }
+          if (!cancelled.current) setLoaded(true);
+          // Live updates: re-read shared state every few seconds.
+          poll = setInterval(async () => {
+            try {
+              const s = await fetchPlots();
+              if (!cancelled.current && s.plots.length > 0) setPlots(s.plots);
+            } catch {
+              /* ignore transient poll errors */
+            }
+          }, POLL_MS);
         };
         image.onerror = () => setLoaded(true);
         image.src = url;
@@ -79,7 +91,10 @@ export default function PublicViewer() {
         setLoaded(true);
       }
     })();
+
     return () => {
+      cancelled.current = true;
+      if (poll) clearInterval(poll);
       if (url) URL.revokeObjectURL(url);
     };
   }, []);
@@ -97,7 +112,7 @@ export default function PublicViewer() {
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-      {/* Map on the left (fills the space, fits the viewport height). */}
+      {/* Map on the left. */}
       <div className="min-w-0 flex-1">
         {imgUrl && (
           <PlotMap
