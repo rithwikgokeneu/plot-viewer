@@ -16,6 +16,7 @@ import {
 
 const BUNDLED_MAP = "/plotmap.png";
 const ADMIN_PW = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin";
+const MAX_UNDO = 40;
 
 function minAreaRectAngle(poly: Pt[]): number {
   let bestArea = Infinity;
@@ -61,6 +62,7 @@ export default function PlotEditor() {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [proc, setProc] = useState({ w: 0, h: 0 });
   const [plots, setPlots] = useState<Plot[]>([]);
+  const [undoStack, setUndoStack] = useState<Plot[][]>([]);
   const [busy, setBusy] = useState<string | null>("Loading map…");
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -68,6 +70,12 @@ export default function PlotEditor() {
   const [tilt, setTilt] = useState(0);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const procRef = useRef({ w: 0, h: 0 });
+  const plotsRef = useRef<Plot[]>([]);
+
+  // Keep a live ref of the current plots so mutations + undo read fresh values.
+  useEffect(() => {
+    plotsRef.current = plots;
+  }, [plots]);
 
   const runDetect = useCallback(
     (image: HTMLImageElement, pw: number, ph: number): Plot[] => {
@@ -102,6 +110,28 @@ export default function PlotEditor() {
     }
   }, []);
 
+  // Apply an edit: snapshot the current plots for undo, update state + DB.
+  const commit = useCallback(
+    (next: Plot[]) => {
+      setUndoStack((s) => [...s.slice(-(MAX_UNDO - 1)), plotsRef.current]);
+      plotsRef.current = next;
+      setPlots(next);
+      void persist(next);
+    },
+    [persist]
+  );
+
+  function undo() {
+    setUndoStack((s) => {
+      if (s.length === 0) return s;
+      const prev = s[s.length - 1];
+      plotsRef.current = prev;
+      setPlots(prev);
+      void persist(prev);
+      return s.slice(0, -1);
+    });
+  }
+
   useEffect(() => {
     let url: string | null = null;
     (async () => {
@@ -119,6 +149,7 @@ export default function PlotEditor() {
           try {
             const state = await fetchPlots();
             if (state.plots.length > 0) {
+              plotsRef.current = state.plots;
               setPlots(state.plots);
               setTilt(estimateTilt(state.plots));
               setSavedAt(state.updatedAt);
@@ -126,6 +157,7 @@ export default function PlotEditor() {
             } else {
               setBusy("Detecting plots…");
               const next = runDetect(image, pr.w, pr.h);
+              plotsRef.current = next;
               setPlots(next);
               setTilt(estimateTilt(next));
               await seedPlotsRemote(next, pr.w, pr.h);
@@ -156,32 +188,21 @@ export default function PlotEditor() {
   function addPlot(polygon: Pt[]) {
     let cx = 0, cy = 0;
     for (const pt of polygon) { cx += pt.x; cy += pt.y; }
-    setPlots((prev) => {
-      const nextId = prev.reduce((m, p) => Math.max(m, p.id), 0) + 1;
-      const next = [...prev, {
-        id: nextId, num: "", polygon,
-        centroid: { x: cx / polygon.length, y: cy / polygon.length },
-        status: "available" as Status,
-      }];
-      void persist(next);
-      return next;
-    });
+    const cur = plotsRef.current;
+    const nextId = cur.reduce((m, p) => Math.max(m, p.id), 0) + 1;
+    commit([...cur, {
+      id: nextId, num: "", polygon,
+      centroid: { x: cx / polygon.length, y: cy / polygon.length },
+      status: "available" as Status,
+    }]);
   }
 
   function setStatus(id: number, status: Status) {
-    setPlots((prev) => {
-      const next = prev.map((p) => (p.id === id ? { ...p, status } : p));
-      void persist(next);
-      return next;
-    });
+    commit(plotsRef.current.map((p) => (p.id === id ? { ...p, status } : p)));
   }
 
   function removePlot(id: number) {
-    setPlots((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      void persist(next);
-      return next;
-    });
+    commit(plotsRef.current.filter((p) => p.id !== id));
   }
 
   const counts = countByStatus(plots);
@@ -205,6 +226,14 @@ export default function PlotEditor() {
             className={`rounded px-3 py-2 text-sm font-medium ${addMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-700"}`}
           >
             {addMode ? "Done adding" : "+ Add plot box"}
+          </button>
+          <button
+            onClick={undo}
+            disabled={undoStack.length === 0}
+            title="Undo the last change (restores deleted plots / reverts a status)"
+            className="rounded border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
+          >
+            ↶ Undo{undoStack.length ? ` (${undoStack.length})` : ""}
           </button>
           {addMode && (
             <label className="flex items-center gap-2 rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-600">
@@ -235,7 +264,7 @@ export default function PlotEditor() {
         <p className="text-xs text-neutral-500">
           {addMode
             ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
-            : "Click a plot to set its status (colour) or delete it. Changes save to the live database instantly."}
+            : "Click a plot to set its status (colour) or delete it. Changes save to the live database instantly — use Undo to revert."}
         </p>
       </div>
 
