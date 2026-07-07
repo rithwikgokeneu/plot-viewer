@@ -89,14 +89,8 @@ export default function PlotMap({
 
   return (
     <div
-      className="relative mx-auto select-none overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50"
-      style={{
-        aspectRatio: `${procW} / ${procH}`,
-        // Fill available width, but cap height to the viewport so the whole
-        // map is visible (and never upscaled past its native pixels).
-        width: `min(100%, calc(85vh * ${procW} / ${procH}))`,
-        maxWidth: procW,
-      }}
+      className="relative w-full select-none overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50"
+      style={{ maxWidth: procW, aspectRatio: `${procW} / ${procH}` }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
