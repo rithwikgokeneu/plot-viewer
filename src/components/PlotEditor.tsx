@@ -282,7 +282,7 @@ export default function PlotEditor() {
           {addMode
             ? "Add mode: drag a box around a plot the detector missed. It tilts to match automatically."
             : editMode
-            ? "Edit mode: click a box to select it, then drag a corner to resize or drag the middle to move. Changes save instantly — use Undo to revert."
+            ? "Edit mode: click a box to select it, then drag a corner to reshape, a side to stretch, or the middle to move. Changes save instantly — use Undo to revert."
             : "Click a plot to set its status (colour) or delete it. Changes save to the live database instantly — use Undo to revert."}
         </p>
       </div>

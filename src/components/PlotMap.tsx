@@ -114,7 +114,7 @@ export default function PlotMap({
   const [menu, setMenu] = useState<{ id: number; xPct: number; yPct: number } | null>(null);
   // Edit mode: which box is selected, and the live drag session.
   const [editId, setEditId] = useState<number | null>(null);
-  const [drag, setDrag] = useState<{ id: number; mode: "move" | "corner"; corner: number; start: Pt; orig: Pt[] } | null>(null);
+  const [drag, setDrag] = useState<{ id: number; mode: "move" | "corner" | "edge"; corner: number; start: Pt; orig: Pt[] } | null>(null);
   const [draftBox, setDraftBox] = useState<Pt[] | null>(null);
   const isAdmin = !!onSetStatus;
   // Handle size in proc units, so grab targets stay usable at any display scale.
@@ -128,8 +128,8 @@ export default function PlotMap({
     };
   }
 
-  // Begin dragging a box (move) or one of its corners (resize).
-  function startDrag(e: React.MouseEvent, p: Plot, mode: "move" | "corner", corner: number) {
+  // Begin dragging a box (move), a corner (reshape), or a side (stretch).
+  function startDrag(e: React.MouseEvent, p: Plot, mode: "move" | "corner" | "edge", corner: number) {
     e.stopPropagation();
     setMenu(null);
     setEditId(p.id);
@@ -159,6 +159,11 @@ export default function PlotMap({
       const dy = cur.y - drag.start.y;
       if (drag.mode === "move") {
         setDraftBox(drag.orig.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })));
+      } else if (drag.mode === "edge") {
+        // Stretch a whole side: move both corners of edge i (i → i+1).
+        const a = drag.corner;
+        const b = (drag.corner + 1) % 4;
+        setDraftBox(drag.orig.map((pt, i) => (i === a || i === b ? { x: pt.x + dx, y: pt.y + dy } : pt)));
       } else {
         setDraftBox(drag.orig.map((pt, i) => (i === drag.corner ? { x: pt.x + dx, y: pt.y + dy } : pt)));
       }
@@ -257,12 +262,33 @@ export default function PlotMap({
           );
         })}
 
-        {/* Resize handles for the box being edited. */}
+        {/* Handles for the box being edited: blue squares stretch a side, white circles reshape a corner. */}
         {editMode && editingPlot && editingBox && (
           <g>
+            {editingBox.map((pt, i) => {
+              const nx = editingBox[(i + 1) % 4];
+              const mx = (pt.x + nx.x) / 2;
+              const my = (pt.y + nx.y) / 2;
+              const s = handleR * 1.8;
+              return (
+                <rect
+                  key={`edge-${i}`}
+                  x={mx - s / 2}
+                  y={my - s / 2}
+                  width={s}
+                  height={s}
+                  rx={s * 0.25}
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth={handleR * 0.35}
+                  style={{ cursor: "grab", pointerEvents: "all" }}
+                  onMouseDown={(e) => startDrag(e, editingPlot, "edge", i)}
+                />
+              );
+            })}
             {editingBox.map((pt, i) => (
               <circle
-                key={i}
+                key={`corner-${i}`}
                 cx={pt.x}
                 cy={pt.y}
                 r={handleR}
